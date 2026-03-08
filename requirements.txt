@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain-anthropic
+langchain-pinecone
+langgraph
+pinecone-client
+youtube-transcript-api
+python-dotenv
+psutil

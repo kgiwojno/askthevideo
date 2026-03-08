@@ -1,0 +1,31 @@
+# Environment
+.env
+.venv/
+env/
+.streamlit
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Models & data (too large for git)
+models/
+*.h5
+*.pt
+*.bin
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Koyeb test (throwaway)
+koyeb-test/
