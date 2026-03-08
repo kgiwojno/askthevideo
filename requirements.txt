@@ -1,9 +1,10 @@
-streamlit
+fastapi
+uvicorn[standard]
+sse-starlette
 langchain
 langchain-anthropic
-langchain-pinecone
 langgraph
 pinecone-client
 youtube-transcript-api
 python-dotenv
-psutil
+anthropic
