@@ -1,8 +1,9 @@
 /**
  * Cloudflare Worker — YouTube Transcript Proxy
  *
- * Uses YouTube's Innertube API with the Android client (same as youtube_transcript_api)
- * to fetch transcripts. The Android client returns captions without restrictions.
+ * Uses YouTube's Innertube get_transcript API to fetch transcripts entirely
+ * through the API (no separate timedtext fetch). This avoids YouTube blocking
+ * the timedtext endpoint from cloud IPs.
  *
  * Deploy to Cloudflare Workers (free tier: 100k requests/day).
  *
@@ -13,7 +14,14 @@
  *   4. Set TRANSCRIPT_PROXY_URL and TRANSCRIPT_PROXY_SECRET in your app
  */
 
-const INNERTUBE_CONTEXT = {
+const WEB_CONTEXT = {
+  client: {
+    clientName: "WEB",
+    clientVersion: "2.20240313.05.00",
+  },
+};
+
+const ANDROID_CONTEXT = {
   client: {
     clientName: "ANDROID",
     clientVersion: "20.10.38",
@@ -55,12 +63,14 @@ export default {
     }
 
     try {
-      // Step 1: Get video page to extract the API key
+      // Step 1: Get video page to extract API key and serialized share entity (for get_transcript)
       const pageResp = await fetch(
         `https://www.youtube.com/watch?v=${videoId}&hl=en`,
         {
           headers: {
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
             Cookie: "CONSENT=PENDING+999",
           },
           redirect: "follow",
@@ -72,35 +82,43 @@ export default {
       }
 
       const html = await pageResp.text();
-      const apiKeyMatch = html.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
+
+      // Extract API key
+      const apiKeyMatch = html.match(
+        /"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/
+      );
       const apiKey = apiKeyMatch
         ? apiKeyMatch[1]
         : "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 
-      // Step 2: Call Innertube player API with Android client
+      // Step 2: Use player API with Android client to check video availability and get caption info
       const playerResp = await fetch(
         `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            context: INNERTUBE_CONTEXT,
+            context: ANDROID_CONTEXT,
             videoId: videoId,
           }),
         }
       );
 
       if (!playerResp.ok) {
-        return jsonErr(`Innertube API returned HTTP ${playerResp.status}`, 502);
+        return jsonErr(
+          `Innertube player API returned HTTP ${playerResp.status}`,
+          502
+        );
       }
 
       const playerData = await playerResp.json();
 
       // Check playability
-      const status = playerData?.playabilityStatus?.status;
-      if (status === "ERROR" || status === "UNPLAYABLE") {
+      const playStatus = playerData?.playabilityStatus?.status;
+      if (playStatus === "ERROR" || playStatus === "UNPLAYABLE") {
         const reason =
-          playerData?.playabilityStatus?.reason || `Video ${videoId} is unavailable`;
+          playerData?.playabilityStatus?.reason ||
+          `Video ${videoId} is unavailable`;
         return jsonErr(reason, 404);
       }
 
@@ -116,64 +134,194 @@ export default {
         captions.find((c) => c.languageCode === "en") ||
         captions[0];
 
-      // Step 3: Fetch transcript from the baseUrl
-      // Remove &exp=xpe if present (requires special handling)
-      let transcriptUrl = track.baseUrl;
-
-      const transcriptResp = await fetch(transcriptUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-      });
-
-      if (!transcriptResp.ok) {
-        return jsonErr(
-          `Transcript fetch failed with HTTP ${transcriptResp.status}`,
-          502
-        );
+      // Step 3: Try get_transcript API (returns transcript in response, no separate fetch)
+      const transcriptResult = await tryGetTranscript(
+        apiKey,
+        videoId,
+        track.languageCode
+      );
+      if (transcriptResult) {
+        return buildSuccess(videoId, transcriptResult, track);
       }
 
-      const transcriptText = await transcriptResp.text();
-
-      // The baseUrl returns XML by default, parse it
-      const snippets = parseTranscriptXml(transcriptText);
-
-      if (snippets.length === 0) {
-        // Try JSON format as fallback
-        const jsonResp = await fetch(transcriptUrl + "&fmt=json3", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-        });
-        if (jsonResp.ok) {
-          const jsonText = await jsonResp.text();
-          try {
-            const jsonData = JSON.parse(jsonText);
-            const jsonSnippets = parseTranscriptJson(jsonData);
-            if (jsonSnippets.length > 0) {
-              return buildSuccess(videoId, jsonSnippets, track);
-            }
-          } catch {}
-        }
-        return jsonErr("Transcript is empty", 404);
+      // Step 4: Fallback — try fetching baseUrl with Android client headers
+      const baseUrlResult = await tryBaseUrl(track.baseUrl);
+      if (baseUrlResult && baseUrlResult.length > 0) {
+        return buildSuccess(videoId, baseUrlResult, track);
       }
 
-      return buildSuccess(videoId, snippets, track);
+      // Step 5: Fallback — try constructing timedtext URL manually
+      const manualResult = await tryManualTimedtext(videoId, track.languageCode);
+      if (manualResult && manualResult.length > 0) {
+        return buildSuccess(videoId, manualResult, track);
+      }
+
+      return jsonErr(
+        `Could not fetch transcript for video ${videoId}. YouTube may be blocking cloud IPs.`,
+        502
+      );
     } catch (err) {
       return jsonErr(`Proxy error: ${err.message}`, 500);
     }
   },
 };
 
+/**
+ * Try the Innertube get_transcript endpoint.
+ * This returns transcript data directly in the API response.
+ */
+async function tryGetTranscript(apiKey, videoId, langCode) {
+  try {
+    const resp = await fetch(
+      `https://www.youtube.com/youtubei/v1/get_transcript?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: WEB_CONTEXT,
+          params: buildTranscriptParams(videoId),
+        }),
+      }
+    );
+
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+
+    // Navigate the response structure
+    const renderer =
+      data?.actions?.[0]?.updateEngagementPanelAction?.content
+        ?.transcriptRenderer?.body?.transcriptBodyRenderer;
+    if (!renderer) return null;
+
+    const cueGroups = renderer.cueGroups;
+    if (!cueGroups || cueGroups.length === 0) return null;
+
+    const snippets = [];
+    for (const group of cueGroups) {
+      const cues =
+        group.transcriptCueGroupRenderer?.cues;
+      if (!cues) continue;
+      for (const cue of cues) {
+        const r = cue.transcriptCueRenderer;
+        if (!r) continue;
+        const text = (r.cue?.simpleText || "").trim();
+        const startMs = parseInt(r.startOffsetMs || "0", 10);
+        const durationMs = parseInt(r.durationMs || "0", 10);
+        if (text) {
+          snippets.push({
+            text,
+            start: startMs / 1000,
+            duration: durationMs / 1000,
+          });
+        }
+      }
+    }
+
+    return snippets.length > 0 ? snippets : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build the protobuf-like params for get_transcript.
+ * This encodes the video ID in the format YouTube expects.
+ */
+function buildTranscriptParams(videoId) {
+  // The params field is a base64-encoded protobuf message.
+  // Structure: field 1 (string) = "\n" + videoId
+  // This is the same encoding youtube_transcript_api uses.
+  const inner = "\n" + videoId;
+  const outer = "\x12" + String.fromCharCode(inner.length) + inner;
+  return btoa(outer);
+}
+
+/**
+ * Fallback: fetch transcript from baseUrl with proper headers
+ */
+async function tryBaseUrl(baseUrl) {
+  if (!baseUrl) return null;
+  try {
+    const resp = await fetch(baseUrl, {
+      headers: {
+        "User-Agent":
+          "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    if (!resp.ok) return null;
+    const text = await resp.text();
+    if (!text || text.length < 50) return null;
+    const snippets = parseTranscriptXml(text);
+    if (snippets.length > 0) return snippets;
+
+    // Try JSON format
+    const jsonResp = await fetch(baseUrl + "&fmt=json3", {
+      headers: {
+        "User-Agent":
+          "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)",
+      },
+    });
+    if (!jsonResp.ok) return null;
+    const jsonText = await jsonResp.text();
+    try {
+      const jsonData = JSON.parse(jsonText);
+      return parseTranscriptJson(jsonData);
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fallback: construct timedtext URL manually
+ */
+async function tryManualTimedtext(videoId, lang) {
+  try {
+    const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang || "en"}&fmt=json3`;
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    if (!resp.ok) return null;
+    const text = await resp.text();
+    if (!text || text.length < 50) return null;
+    try {
+      const data = JSON.parse(text);
+      return parseTranscriptJson(data);
+    } catch {
+      // Maybe XML
+      return parseTranscriptXml(text);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** Parse transcript XML format: <text start="0" dur="1.5">Hello</text> */
 function parseTranscriptXml(xml) {
   const snippets = [];
-  const regex = /<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+  // Handle both <text> (standard) and <p> (timedtext format 3) tags
+  const regex =
+    /<(?:text|p)\s+(?:start|t)="([\d.]+)"\s+(?:dur|d)="([\d.]+)"[^>]*>([\s\S]*?)<\/(?:text|p)>/g;
   let match;
   while ((match = regex.exec(xml)) !== null) {
+    let startVal = parseFloat(match[1]);
+    let durVal = parseFloat(match[2]);
     const text = decodeHtmlEntities(match[3]).trim();
+    // <p t="..." d="..."> uses milliseconds
+    if (match[0].startsWith("<p")) {
+      startVal = startVal / 1000;
+      durVal = durVal / 1000;
+    }
     if (text) {
-      snippets.push({
-        text,
-        start: parseFloat(match[1]),
-        duration: parseFloat(match[2]),
-      });
+      snippets.push({ text, start: startVal, duration: durVal });
     }
   }
   return snippets;
