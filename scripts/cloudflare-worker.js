@@ -22,6 +22,7 @@ const BROWSER_HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
   Accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  Cookie: "CONSENT=PENDING+999",
 };
 
 export default {
@@ -118,7 +119,14 @@ export default {
         );
       }
 
-      const transcriptData = await transcriptResp.json();
+      const transcriptText = await transcriptResp.text();
+      let transcriptData;
+      try {
+        transcriptData = JSON.parse(transcriptText);
+      } catch {
+        // Got HTML instead of JSON — fall back to video page
+        return await fetchViaVideoPage(videoId);
+      }
       return buildResponse(videoId, transcriptData, track);
     } catch (err) {
       return Response.json(
