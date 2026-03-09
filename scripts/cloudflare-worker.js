@@ -91,7 +91,16 @@ export default {
         ? apiKeyMatch[1]
         : "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 
-      // Step 2: Use player API with Android client to check video availability and get caption info
+      // Step 2: Try get_transcript API first (works even when player API says UNPLAYABLE)
+      const transcriptResult = await tryGetTranscript(apiKey, videoId, "en");
+      if (transcriptResult) {
+        return buildSuccess(videoId, transcriptResult, { languageCode: "en", kind: "asr" });
+      }
+
+      // Step 3: Use player API with Android client to get caption tracks + baseUrl
+      let captions = null;
+      let track = null;
+
       const playerResp = await fetch(
         `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
         {
@@ -104,61 +113,46 @@ export default {
         }
       );
 
-      if (!playerResp.ok) {
-        return jsonErr(
-          `Innertube player API returned HTTP ${playerResp.status}`,
-          502
-        );
+      if (playerResp.ok) {
+        const playerData = await playerResp.json();
+
+        // Only hard-fail on ERROR status (not UNPLAYABLE — captions may still exist)
+        const playStatus = playerData?.playabilityStatus?.status;
+        if (playStatus === "ERROR") {
+          const reason =
+            playerData?.playabilityStatus?.reason ||
+            `Video ${videoId} is unavailable`;
+          return jsonErr(reason, 404);
+        }
+
+        captions =
+          playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+        if (captions && captions.length > 0) {
+          track =
+            captions.find((c) => c.languageCode === "en" && c.kind !== "asr") ||
+            captions.find((c) => c.languageCode === "en") ||
+            captions[0];
+        }
       }
 
-      const playerData = await playerResp.json();
-
-      // Check playability
-      const playStatus = playerData?.playabilityStatus?.status;
-      if (playStatus === "ERROR" || playStatus === "UNPLAYABLE") {
-        const reason =
-          playerData?.playabilityStatus?.reason ||
-          `Video ${videoId} is unavailable`;
-        return jsonErr(reason, 404);
-      }
-
-      const captions =
-        playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      if (!captions || captions.length === 0) {
-        return jsonErr(`No captions available for video ${videoId}`, 404);
-      }
-
-      // Prefer manual English → auto English → first available
-      const track =
-        captions.find((c) => c.languageCode === "en" && c.kind !== "asr") ||
-        captions.find((c) => c.languageCode === "en") ||
-        captions[0];
-
-      // Step 3: Try get_transcript API (returns transcript in response, no separate fetch)
-      const transcriptResult = await tryGetTranscript(
-        apiKey,
-        videoId,
-        track.languageCode
-      );
-      if (transcriptResult) {
-        return buildSuccess(videoId, transcriptResult, track);
-      }
-
-      // Step 4: Fallback — try fetching baseUrl with Android client headers
-      const baseUrlResult = await tryBaseUrl(track.baseUrl);
-      if (baseUrlResult && baseUrlResult.length > 0) {
-        return buildSuccess(videoId, baseUrlResult, track);
+      // Step 4: If we got a track with baseUrl, try fetching it
+      if (track?.baseUrl) {
+        const baseUrlResult = await tryBaseUrl(track.baseUrl);
+        if (baseUrlResult && baseUrlResult.length > 0) {
+          return buildSuccess(videoId, baseUrlResult, track);
+        }
       }
 
       // Step 5: Fallback — try constructing timedtext URL manually
-      const manualResult = await tryManualTimedtext(videoId, track.languageCode);
+      const lang = track?.languageCode || "en";
+      const manualResult = await tryManualTimedtext(videoId, lang);
       if (manualResult && manualResult.length > 0) {
-        return buildSuccess(videoId, manualResult, track);
+        return buildSuccess(videoId, manualResult, track || { languageCode: lang, kind: "asr" });
       }
 
       return jsonErr(
-        `Could not fetch transcript for video ${videoId}. YouTube may be blocking cloud IPs.`,
-        502
+        `No captions available for video ${videoId}`,
+        404
       );
     } catch (err) {
       return jsonErr(`Proxy error: ${err.message}`, 500);
