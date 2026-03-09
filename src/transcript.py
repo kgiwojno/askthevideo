@@ -1,5 +1,9 @@
 """Auto-generated from notebooks. Do not edit directly."""
 
+import os
+import json
+import urllib.request
+import urllib.error
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     TranscriptsDisabled,
@@ -13,8 +17,47 @@ import re
 
 
 
+def _fetch_via_proxy(video_id: str) -> dict:
+    """Fetch transcript via Cloudflare Worker proxy (fallback for IP blocks)."""
+    proxy_url = os.getenv("TRANSCRIPT_PROXY_URL")
+    proxy_secret = os.getenv("TRANSCRIPT_PROXY_SECRET", "")
+    if not proxy_url:
+        raise ValueError("YouTube is blocking requests and no transcript proxy is configured.")
+
+    payload = json.dumps({"video_id": video_id}).encode()
+    headers = {"Content-Type": "application/json"}
+    if proxy_secret:
+        headers["Authorization"] = f"Bearer {proxy_secret}"
+
+    req = urllib.request.Request(proxy_url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        try:
+            err_data = json.loads(body)
+            msg = err_data.get("error", body[:100])
+        except Exception:
+            msg = body[:100] or f"HTTP {e.code}"
+        raise ValueError(f"Transcript proxy error: {msg}")
+    except Exception as e:
+        raise ValueError(f"Transcript proxy unreachable: {type(e).__name__}")
+
+    return {
+        "video_id": data["video_id"],
+        "language": data.get("language", "unknown"),
+        "is_generated": data.get("is_generated", True),
+        "snippets": data["snippets"],
+        "duration_seconds": data["duration_seconds"],
+    }
+
+
 def fetch_transcript(video_id: str) -> dict:
     """Fetch transcript for a YouTube video.
+    
+    Tries the youtube_transcript_api first. If blocked by YouTube IP filtering,
+    falls back to a Cloudflare Worker proxy (if TRANSCRIPT_PROXY_URL is set).
     
     Returns dict with:
         - video_id: str
@@ -24,7 +67,7 @@ def fetch_transcript(video_id: str) -> dict:
         - duration_seconds: float (estimated from last snippet)
     
     Raises:
-        ValueError: if transcript is unavailable (disabled, not found, or video removed)
+        ValueError: if transcript is unavailable
     """
     ytt_api = YouTubeTranscriptApi()
     
@@ -37,7 +80,7 @@ def fetch_transcript(video_id: str) -> dict:
     except VideoUnavailable:
         raise ValueError(f"Video {video_id} is unavailable")
     except (IpBlocked, RequestBlocked):
-        raise ValueError(f"YouTube is blocking transcript requests. Please try again later.")
+        return _fetch_via_proxy(video_id)
     except Exception as e:
         raise ValueError(f"Could not fetch transcript for video {video_id}: {type(e).__name__}")
     

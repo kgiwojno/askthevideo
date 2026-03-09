@@ -288,6 +288,28 @@ if path:
 
 ---
 
+## 23. Cloudflare Worker transcript proxy — YouTube IP block workaround
+
+**Spec said:** N/A.
+**Actual:** YouTube blocks transcript requests from Koyeb's cloud server IPs (both US and EU regions). All new video loads fail with `IpBlocked`.
+
+**Fix:** Added a Cloudflare Worker as a transparent fallback proxy:
+- `scripts/cloudflare-worker.js` — standalone worker that fetches YouTube transcripts via the Innertube API and returns JSON
+- `src/transcript.py` — `_fetch_via_proxy()` function calls the worker when `IpBlocked`/`RequestBlocked` is caught
+- Worker is authenticated via `TRANSCRIPT_PROXY_SECRET` (Bearer token)
+- Two new env vars: `TRANSCRIPT_PROXY_URL`, `TRANSCRIPT_PROXY_SECRET`
+
+**Flow:**
+1. `fetch_transcript()` tries `youtube_transcript_api` directly
+2. If `IpBlocked` / `RequestBlocked` → calls `_fetch_via_proxy()`
+3. Proxy fetches from YouTube using Cloudflare's IP (not blocked)
+4. Returns same `{video_id, language, snippets, duration_seconds}` format
+5. Once cached in Pinecone, YouTube is never hit again for that video
+
+**Cost:** Free (Cloudflare Workers free tier: 100,000 requests/day)
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -314,3 +336,4 @@ if path:
 | 20 | `api/main.py` | Default `HTTPException` handler | Custom handler strips `detail` wrapper | Frontend expects `{error, code}` at top level |
 | 21 | `api/main.py` | Only serve `assets/` + `index.html` | Serve any file from `frontend/` root | Favicon, robots.txt etc. now accessible |
 | 22 | `src/transcript.py`, `api/routes/videos.py` | 3 exception types only | Added `IpBlocked`, `RequestBlocked`, catch-all | Descriptive errors for all failure modes |
+| 23 | `src/transcript.py`, `scripts/cloudflare-worker.js` | Direct YouTube fetch only | Cloudflare Worker proxy fallback | YouTube blocks cloud server IPs |
