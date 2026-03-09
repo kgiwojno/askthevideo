@@ -86,58 +86,112 @@ make test      # Run pytest
 make all       # extract → format → lint → test
 ```
 
+### Unit tests (pytest)
+
+Fast, offline tests — no API keys or running server needed:
+
+```bash
+source .venv/bin/activate
+pytest tests/ -v
+```
+
+### Smoke tests (end-to-end against a running server)
+
+Requires a running server (local or production). Tests all 15 API scenarios including SSE streaming:
+
+```bash
+source .venv/bin/activate
+
+# Against local server or local Docker container
+python scripts/smoke_test.py http://localhost:8000
+
+# Against production
+python scripts/smoke_test.py https://app.askthevideo.com
+
+# Or via environment variable
+BASE_URL=http://localhost:8000 python scripts/smoke_test.py
+```
+
 ---
 
 ## Docker
 
-### Build the image
+### 1. Prepare the env file
+
+`docker run` needs a plain `KEY=value` env file (no `export` prefix). Generate it from your existing `.env`:
+
+```bash
+sed 's/^export //' .env > .env.docker
+```
+
+This file is gitignored — never commit it.
+
+### 2. Build the image
+
+Use the build script:
+
+```bash
+./scripts/docker_build.sh
+```
+
+Or directly with Docker:
 
 ```bash
 docker build -t askthevideo .
 ```
 
-### Add the React frontend before building (optional)
-
-The `frontend/` directory is copied into the image. If you have a production React build, place it there before building:
+To build with a custom tag:
 
 ```bash
-# Copy your React build output
-cp -r /path/to/react-build/* frontend/
+IMAGE_NAME=myrepo/askthevideo TAG=v1.0 ./scripts/docker_build.sh
+```
 
-# Then build
-docker build -t askthevideo .
+### 3. Add the React frontend (optional, before building)
+
+The `frontend/` directory is copied into the image. Drop in a production React build before running the build script:
+
+```bash
+cp -r /path/to/react-build/* frontend/
+./scripts/docker_build.sh
 ```
 
 Without a React build, a placeholder page is served at `/`. The API always works at `/api/`.
 
-### Run locally with Docker
-
-Create a file called `.env.docker` with your environment variables (one per line, no `export`):
-
-```
-ANTHROPIC_API_KEY=sk-ant-...
-PINECONE_API_KEY=...
-PINECONE_INDEX_NAME=askthevideo
-LANGSMITH_API_KEY=lsv2_...
-LANGSMITH_TRACING=true
-LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
-LANGSMITH_PROJECT=askthevideo
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-ADMIN_TOKEN=...
-VALID_ACCESS_KEYS=ASKTHEVIDEO2026
-```
-
-Then run:
+### 4. Run the container locally
 
 ```bash
-docker run --env-file .env.docker -p 8000:8000 askthevideo
+docker run --env-file .env.docker -p 8000:8000 askthevideo:latest
 ```
 
-Check it's running:
+The app is now available at `http://localhost:8000`.
+
+Verify it's running:
 
 ```bash
 curl http://localhost:8000/health
 # {"status": "ok"}
+```
+
+Run the smoke tests against it:
+
+```bash
+source .venv/bin/activate
+python scripts/smoke_test.py http://localhost:8000
+```
+
+### 5. Stop the container
+
+Find and stop the running container:
+
+```bash
+docker ps                        # find the container ID
+docker stop <container-id>
+```
+
+Or run it in the foreground (Ctrl+C to stop):
+
+```bash
+docker run --env-file .env.docker -p 8000:8000 askthevideo:latest
 ```
 
 ### Tag and push to a registry (for deployment)
@@ -230,5 +284,3 @@ Session ID is passed via `X-Session-ID` header. First request omits it; the resp
 | Questions | 10 |
 | Max video duration | 60 minutes |
 | Session TTL | 2 hours |
-
-Limits are lifted when a valid access key is submitted to `POST /api/auth`.

@@ -1,10 +1,12 @@
 """POST/GET/DELETE/PATCH /api/videos endpoints."""
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api.dependencies import get_pinecone
 from api.session import get_or_create_session, build_limits
+from api.utils import get_client_ip
+from src.metrics import record_metric, log_event
 from config.settings import MAX_VIDEOS_FREE, MAX_DURATION_FREE, CHUNK_WINDOW_SECONDS, CHUNK_CARRY_SNIPPETS
 from src.chunking import chunk_transcript, format_time
 from src.metadata import fetch_video_metadata
@@ -25,6 +27,7 @@ class VideoPatchRequest(BaseModel):
 @router.post("/videos")
 def post_video(
     body: VideoRequest,
+    request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
 ):
     sid, session = get_or_create_session(x_session_id)
@@ -63,6 +66,9 @@ def post_video(
             }
             session["loaded_videos"].append(video_info)
             session["agent"] = None  # force agent rebuild
+            record_metric("total_videos_loaded")
+            ip = get_client_ip(request)
+            log_event("VIDEO", "cache", ip, f'"{video_info["title"]}" | video={video_id}')
             return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
     # New video — fetch transcript
@@ -118,6 +124,11 @@ def post_video(
     session["loaded_videos"].append(video_info)
     session["agent"] = None  # force agent rebuild
 
+    record_metric("total_videos_loaded")
+    record_metric("total_videos_cached")
+    ip = get_client_ip(request)
+    log_event("VIDEO", "new", ip, f'"{oembed["video_title"]}" | video={video_id} | chunks={len(chunks)}')
+
     return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
 
@@ -156,5 +167,5 @@ def patch_video(
         if v["video_id"] == video_id:
             v["selected"] = body.selected
             session["agent"] = None  # force agent rebuild on selection change
-            return {"session_id": sid, "video_id": video_id, "selected": body.selected}
+            return {"session_id": sid, "video_id": video_id, "selected": v["selected"]}
     raise HTTPException(404, detail={"error": "Video not in session.", "code": "NOT_FOUND"})

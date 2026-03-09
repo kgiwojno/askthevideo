@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routes import ask, auth, status, videos
+from api.routes import admin, ask, auth, status, videos
 
 load_dotenv()
 
@@ -18,6 +18,7 @@ app.include_router(videos.router, prefix="/api")
 app.include_router(ask.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 
 @app.get("/health")

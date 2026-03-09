@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from config.settings import SESSION_TTL_HOURS
+from src.metrics import record_metric, log_event, _app_metrics
 
 sessions: dict[str, dict] = {}
 SESSION_TTL = timedelta(hours=SESSION_TTL_HOURS)
@@ -15,6 +16,9 @@ def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
     expired = [k for k, v in sessions.items() if now - v["created_at"] > SESSION_TTL]
     for k in expired:
         del sessions[k]
+        with _app_metrics["lock"]:
+            _app_metrics["active_sessions"] = max(0, _app_metrics["active_sessions"] - 1)
+        log_event("SESSION", "end", "—", f"active={_app_metrics['active_sessions']}")
 
     if session_id and session_id in sessions:
         return session_id, sessions[session_id]
@@ -30,6 +34,8 @@ def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
         "agent_thread_id": new_id,
         "_agent_videos": [],
     }
+    record_metric("active_sessions")
+    log_event("SESSION", "start", "—", f"active={_app_metrics['active_sessions']}")
     return new_id, sessions[new_id]
 
 

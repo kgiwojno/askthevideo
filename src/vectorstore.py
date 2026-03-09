@@ -1,8 +1,10 @@
 """Auto-generated from notebooks. Do not edit directly."""
 
+from pinecone import Pinecone
 import os
 import time
-from pinecone import Pinecone
+
+
 
 EMBED_MODEL = "llama-text-embed-v2"
 EMBED_BATCH_SIZE = 50
@@ -118,7 +120,7 @@ def query_chunks(pc, index, question: str, video_id: str, top_k: int = 5) -> lis
     return [
         {"score": m.score, "id": m.id, **m.metadata}
         for m in results.matches
-        if m.metadata.get("type", "chunk") == "chunk"  # bug fix: was != "metadata"
+        if m.metadata.get("type") != "metadata"
     ]
 
 

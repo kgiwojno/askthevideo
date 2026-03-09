@@ -1,6 +1,7 @@
 """Auto-generated from notebooks. Do not edit directly."""
 
 
+
 def format_time(seconds: float) -> str:
     """Convert seconds to H:MM:SS or M:SS display format."""
     h = int(seconds // 3600)
@@ -51,9 +52,11 @@ def chunk_transcript(
             chunk_snippets.append(snippets[i])
             i += 1
 
+        # Plain text (for embedding)
         plain_parts = [s["text"].replace("\n", " ") for s in chunk_snippets]
         text = " ".join(plain_parts)
 
+        # Timestamped text (for LLM)
         stamped_lines = [
             f"[{format_time(s['start'])}] {s['text'].replace(chr(10), ' ')}"
             for s in chunk_snippets
@@ -74,6 +77,7 @@ def chunk_transcript(
             "video_url": f"https://youtu.be/{video_id}?t={int(start_time)}",
         })
 
+        # Carry last N snippets from non-carried portion
         non_carry = chunk_snippets[len(carry):]
         carry = non_carry[-carry_snippets:] if carry_snippets > 0 else []
 

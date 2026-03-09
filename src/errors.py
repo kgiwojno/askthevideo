@@ -6,6 +6,8 @@ import urllib.error
 import json
 import traceback
 
+from src.metrics import record_metric, log_event
+
 
 class UserFacingError(Exception):
     """An error with a user-readable message and machine code."""
@@ -21,6 +23,8 @@ def send_discord_alert(message: str) -> None:
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     if not webhook_url:
         return
+    record_metric("alert_count")
+    log_event("ALERT", "discord", "—", message[:80])
     payload = json.dumps({"content": message[:2000]}).encode()
     try:
         req = urllib.request.Request(
@@ -42,6 +46,8 @@ def safe_execute(func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
     except Exception as exc:
+        record_metric("error_count")
+        log_event("ERROR", "exc", "—", f"{func.__name__}: {type(exc).__name__}: {str(exc)[:80]}")
         alert = f"[AskTheVideo] Error in {func.__name__}:\n```\n{traceback.format_exc()[-1500:]}\n```"
         send_discord_alert(alert)
         raise

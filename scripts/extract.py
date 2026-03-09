@@ -24,7 +24,14 @@ def extract_notebook(nb_path: Path) -> dict[str, list[str]]:
     for cell in nb.get("cells", []):
         if cell.get("cell_type") != "code":
             continue
-        source_lines = cell.get("source", [])
+        raw_source = cell.get("source", [])
+        if not raw_source:
+            continue
+        # Handle both list-of-lines and single-string formats
+        if isinstance(raw_source, str):
+            source_lines = raw_source.splitlines(keepends=True)
+        else:
+            source_lines = raw_source
         if not source_lines:
             continue
         first = source_lines[0].strip()
@@ -40,15 +47,42 @@ def extract_notebook(nb_path: Path) -> dict[str, list[str]]:
 
 
 def collect_imports(source: str) -> tuple[list[str], str]:
-    """Split source into (import_lines, rest)."""
+    """Split source into (import_lines, rest).
+
+    Handles multi-line imports with parentheses, e.g.:
+        from foo import (
+            Bar,
+            Baz,
+        )
+    """
     import_lines = []
     rest_lines = []
+    in_multiline = False
+    current_import: list[str] = []
+
     for line in source.splitlines(keepends=True):
         stripped = line.strip()
-        if stripped.startswith("import ") or stripped.startswith("from "):
-            import_lines.append(line)
+
+        if in_multiline:
+            current_import.append(line)
+            if ")" in line:
+                import_lines.extend(current_import)
+                current_import = []
+                in_multiline = False
+        elif stripped.startswith("import ") or stripped.startswith("from "):
+            if "(" in line and ")" not in line:
+                # Opening of a multi-line import
+                in_multiline = True
+                current_import = [line]
+            else:
+                import_lines.append(line)
         else:
             rest_lines.append(line)
+
+    # Shouldn't happen, but flush any unclosed import
+    if current_import:
+        import_lines.extend(current_import)
+
     return import_lines, "".join(rest_lines)
 
 

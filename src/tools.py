@@ -4,6 +4,10 @@ import os
 import time
 from anthropic import Anthropic
 from pinecone import Pinecone
+from src.metrics import record_tokens
+
+
+
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 EMBED_MODEL = "llama-text-embed-v2"
@@ -42,7 +46,7 @@ def _query_chunks(pc, index, question, video_id, top_k=5):
     return [
         {"score": m.score, "id": m.id, **m.metadata}
         for m in results.matches
-        if m.metadata.get("type", "chunk") == "chunk"
+        if m.metadata.get("type") == "chunk"
     ]
 
 
@@ -62,9 +66,9 @@ def _fetch_all_chunks(index, video_id):
 
 
 def _build_full_text(chunks):
-    """Build plain-text transcript from chunks (with timestamp headers)."""
+    """Build plain-text transcript from chunks (with timestamp headers and video URLs)."""
     return "\n\n".join(
-        f"[{c['start_display']}–{c['end_display']}]\n{c['text']}"
+        f"[{c['start_display']}–{c['end_display']}]({c['video_url']})\n{c['text']}"
         for c in chunks
     )
 
@@ -73,11 +77,13 @@ def _fetch_or_generate_cached(index, client, video_id, record_suffix, system_pro
     """Shared pattern: check Pinecone cache, generate with Claude if missing, cache result."""
     record_id = f"{video_id}_{record_suffix}"
 
+    # Check cache
     cached = index.fetch(ids=[record_id], namespace=video_id)
     vec = cached.vectors.get(record_id)
     if vec and vec.metadata.get("text"):
         return {"text": vec.metadata["text"], "cached": True, "usage": None}
 
+    # Fetch all chunks and build transcript
     chunks = _fetch_all_chunks(index, video_id)
     if not chunks:
         return {"text": "No transcript data found.", "cached": False, "usage": None}
@@ -90,9 +96,11 @@ def _fetch_or_generate_cached(index, client, video_id, record_suffix, system_pro
         system=system_prompt,
         messages=[{"role": "user", "content": f"{user_prompt_prefix}\n\n{full_text}"}],
     )
+    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     result_text = response.content[0].text
 
+    # Cache
     index.upsert(
         vectors=[{
             "id": record_id,
@@ -115,6 +123,8 @@ def _fetch_or_generate_cached(index, client, video_id, record_suffix, system_pro
         },
     }
 
+
+# ── Tool 1: vector_search ──
 
 def vector_search(pc, index, client, question, video_ids):
     """Search transcript chunks and answer with Claude."""
@@ -139,13 +149,15 @@ def vector_search(pc, index, client, question, video_ids):
         model=CLAUDE_MODEL,
         max_tokens=1024,
         system="You answer questions about YouTube videos using transcript excerpts. "
-               "Always reference specific timestamps from the excerpts. "
+               "Always reference specific timestamps as clickable markdown links, e.g. [2:30](https://youtu.be/ID?t=150). "
+               "Use the video URLs provided in the excerpt headers. "
                "If the excerpts don't contain relevant information, say so.",
         messages=[{
             "role": "user",
             "content": f"Transcript excerpts:\n\n{context}\n\n---\n\nQuestion: {question}",
         }],
     )
+    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     return {
         "answer": response.content[0].text,
@@ -157,6 +169,8 @@ def vector_search(pc, index, client, question, video_ids):
     }
 
 
+# ── Tool 2: summarize_video ──
+
 def summarize_video(index, client, video_id):
     """Generate or retrieve cached video summary."""
     result = _fetch_or_generate_cached(
@@ -165,12 +179,15 @@ def summarize_video(index, client, video_id):
         system_prompt=(
             "You summarise YouTube videos from their transcript. "
             "Provide: a one-paragraph overview, then 5-7 key points with timestamps. "
-            "Be concise and specific."
+            "Format timestamps as clickable markdown links using the URLs from the transcript headers, "
+            "e.g. [2:30](https://youtu.be/ID?t=150). Be concise and specific."
         ),
         user_prompt_prefix="Summarise this video transcript:",
     )
     return {"summary": result["text"], "cached": result["cached"], "usage": result["usage"]}
 
+
+# ── Tool 3: get_topics ──
 
 def get_topics(index, client, video_id):
     """Generate or retrieve cached topic list."""
@@ -179,13 +196,16 @@ def get_topics(index, client, video_id):
         record_suffix="topics",
         system_prompt=(
             "You extract the main topics from a YouTube video transcript. "
-            "Return a numbered list of 8-12 topics, each with a timestamp range "
-            "and a one-sentence description. Format: '1. [MM:SS-MM:SS] Topic — description'"
+            "Return a numbered list of 8-12 topics, each with a clickable timestamp link "
+            "and a one-sentence description. Use the video URLs from the transcript headers. "
+            "Format: '1. [MM:SS](https://youtu.be/ID?t=SECONDS) Topic — description'"
         ),
         user_prompt_prefix="Extract the main topics from this transcript:",
     )
     return {"topics": result["text"], "cached": result["cached"], "usage": result["usage"]}
 
+
+# ── Tool 4: compare_videos ──
 
 def compare_videos(pc, index, client, question, video_ids):
     """Compare what multiple videos say about a topic."""
@@ -225,13 +245,16 @@ def compare_videos(pc, index, client, question, video_ids):
         model=CLAUDE_MODEL,
         max_tokens=1536,
         system="You compare what different YouTube videos say about a topic. "
-               "Highlight similarities and differences. Reference specific timestamps. "
+               "Highlight similarities and differences. "
+               "Reference specific timestamps as clickable markdown links using the video URLs from the excerpts, "
+               "e.g. [2:30](https://youtu.be/ID?t=150). "
                "If only one video is provided, summarise what it says about the topic.",
         messages=[{
             "role": "user",
             "content": f"Compare these videos on the topic:\n\nQuestion: {question}\n\n{context}",
         }],
     )
+    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     return {
         "answer": response.content[0].text,
@@ -243,6 +266,8 @@ def compare_videos(pc, index, client, question, video_ids):
         "chunks_used": len(all_chunks),
     }
 
+
+# ── Tool 5: get_metadata ──
 
 def get_metadata(index, video_id):
     """Fetch video metadata from Pinecone."""

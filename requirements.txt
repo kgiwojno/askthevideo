@@ -4,7 +4,8 @@ sse-starlette
 langchain
 langchain-anthropic
 langgraph
-pinecone-client
+pinecone
 youtube-transcript-api
 python-dotenv
 anthropic
+psutil

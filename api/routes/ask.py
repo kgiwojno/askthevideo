@@ -1,9 +1,10 @@
 """POST /api/ask and POST /api/ask/stream endpoints."""
 
+import asyncio
 import json
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from langchain_core.tools import tool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -11,7 +12,9 @@ from sse_starlette.sse import EventSourceResponse
 from api.dependencies import get_pinecone, get_anthropic
 from api.session import get_or_create_session, build_limits
 from config.settings import MAX_QUESTIONS_FREE
+from api.utils import get_client_ip
 from src.agent import create_askthevideo_agent
+from src.metrics import record_metric, log_event
 from src.tools import (
     vector_search as _vector_search,
     summarize_video as _summarize_video,
@@ -41,12 +44,16 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def summarize_video(video_id: str) -> str:
         """Generate or retrieve a summary for a specific video by video_id."""
         result = _summarize_video(index, anthropic_client, video_id)
+        source = "cache" if result.get("cached") else "api"
+        log_event("TOOL", source, "—", f"summarize_video video={video_id}")
         return result.get("summary", "Could not generate summary.")
 
     @tool
     def list_topics(video_id: str) -> str:
         """List the main topics covered in a specific video by video_id."""
         result = _get_topics(index, anthropic_client, video_id)
+        source = "cache" if result.get("cached") else "api"
+        log_event("TOOL", source, "—", f"list_topics video={video_id}")
         return result.get("topics", "Could not retrieve topics.")
 
     @tool
@@ -71,13 +78,12 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     return [vector_search, summarize_video, list_topics, compare_videos, get_metadata]
 
 
-def get_or_create_agent(session: dict, tools: list):
-    """Return existing agent or recreate if video list changed."""
-    current_videos = [v["video_id"] for v in session["loaded_videos"]]
-    if session["agent"] is None or session["_agent_videos"] != current_videos:
-        agent, _ = create_askthevideo_agent(tools, current_videos)
+def get_or_create_agent(session: dict, tools: list, selected_videos: list[str]):
+    """Return existing agent or recreate if selected video list changed."""
+    if session["agent"] is None or session["_agent_videos"] != selected_videos:
+        agent, _ = create_askthevideo_agent(tools, selected_videos)
         session["agent"] = agent
-        session["_agent_videos"] = current_videos.copy()
+        session["_agent_videos"] = selected_videos.copy()
     return session["agent"]
 
 
@@ -92,6 +98,7 @@ def _check_preconditions(session: dict):
 @router.post("/ask")
 def post_ask(
     body: AskRequest,
+    request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
 ):
     sid, session = get_or_create_session(x_session_id)
@@ -105,8 +112,10 @@ def post_ask(
     pc, index = get_pinecone()
     anthropic_client = get_anthropic()
     selected = [v["video_id"] for v in session["loaded_videos"] if v.get("selected", True)]
+    if not selected:
+        selected = [v["video_id"] for v in session["loaded_videos"]]
     tools = build_tools(selected, pc, index, anthropic_client)
-    agent = get_or_create_agent(session, tools)
+    agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
 
     try:
@@ -130,6 +139,14 @@ def post_ask(
     session["chat_history"].append({"role": "user", "content": question})
     session["chat_history"].append({"role": "assistant", "content": answer})
 
+    record_metric("total_queries")
+    ip = get_client_ip(request)
+    if session["unlimited"]:
+        record_metric("key_queries")
+        log_event("KEY", "query", ip, f'"{question[:50]}" | count={session["question_count"]}')
+    else:
+        log_event("QUERY", "free", ip, f'"{question[:50]}"')
+
     return {
         "session_id": sid,
         "answer": answer,
@@ -141,6 +158,7 @@ def post_ask(
 @router.post("/ask/stream")
 async def post_ask_stream(
     body: AskRequest,
+    request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
 ):
     sid, session = get_or_create_session(x_session_id)
@@ -154,46 +172,90 @@ async def post_ask_stream(
     pc, index = get_pinecone()
     anthropic_client = get_anthropic()
     selected = [v["video_id"] for v in session["loaded_videos"] if v.get("selected", True)]
+    if not selected:
+        selected = [v["video_id"] for v in session["loaded_videos"]]
     tools = build_tools(selected, pc, index, anthropic_client)
-    agent = get_or_create_agent(session, tools)
+    agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
 
     async def event_generator() -> AsyncGenerator:
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_event_loop()
+
+        def _run_stream():
+            """Run synchronous agent.stream() in a thread, pushing to the queue."""
+            try:
+                for chunk, metadata in agent.stream(
+                    {"messages": [("user", question)]},
+                    config,
+                    stream_mode="messages",
+                ):
+                    loop.call_soon_threadsafe(queue.put_nowait, ("chunk", chunk, metadata))
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", e, None))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", None, None))
+
+        task = asyncio.ensure_future(asyncio.to_thread(_run_stream))
+
         try:
             full_answer = ""
             tool_used = None
+            emitted_tools: set = set()
 
-            for event in agent.stream(
-                {"messages": [("user", question)]},
-                config,
-                stream_mode="updates",
-            ):
-                for key, value in event.items():
-                    if key == "agent":
-                        msgs = value.get("messages", [])
-                        for msg in msgs:
-                            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                                tool_used = msg.tool_calls[0]["name"]
-                                yield {
-                                    "event": "tool",
-                                    "data": json.dumps({"tool_used": tool_used}),
-                                }
-                            elif hasattr(msg, "content") and isinstance(msg.content, str) and msg.content:
-                                new_text = msg.content
-                                if new_text != full_answer:
-                                    delta = new_text[len(full_answer):]
-                                    full_answer = new_text
-                                    if delta:
-                                        yield {
-                                            "event": "token",
-                                            "data": json.dumps({"text": delta}),
-                                        }
+            while True:
+                kind, a, b = await queue.get()
+
+                if kind == "done":
+                    break
+
+                if kind == "error":
+                    yield {"data": json.dumps({"error": str(a), "code": "INTERNAL_ERROR"})}
+                    return
+
+                chunk, metadata = a, b
+                node = metadata.get("langgraph_node", "")
+
+                # Tool call announcement
+                if node == "model" and hasattr(chunk, "tool_calls"):
+                    for tc in (chunk.tool_calls or []):
+                        name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+                        if name and name not in emitted_tools:
+                            tool_used = name
+                            emitted_tools.add(name)
+                            yield {"data": json.dumps({"tool_used": name})}
+
+                # Token streaming — content is list of dicts [{'text': '...', 'type': 'text'}]
+                if node == "model" and hasattr(chunk, "content"):
+                    content = chunk.content
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list):
+                        text = "".join(
+                            c.get("text", "") for c in content
+                            if isinstance(c, dict) and c.get("type") == "text"
+                        )
+                    else:
+                        text = ""
+                    if text:
+                        full_answer += text
+                        yield {"data": json.dumps({"token": text})}
+
+            await task
 
             session["question_count"] += 1
             session["chat_history"].append({"role": "user", "content": question})
             session["chat_history"].append({"role": "assistant", "content": full_answer})
 
-            yield {"event": "done", "data": json.dumps({"limits": build_limits(session)})}
+            record_metric("total_queries")
+            ip = get_client_ip(request)
+            if session["unlimited"]:
+                record_metric("key_queries")
+                log_event("KEY", "query", ip, f'"{question[:50]}" | count={session["question_count"]}')
+            else:
+                log_event("QUERY", "free", ip, f'"{question[:50]}"')
+
+            yield {"data": json.dumps({"limits": build_limits(session)})}
 
         except Exception as e:
             yield {"event": "error", "data": json.dumps({"error": str(e), "code": "INTERNAL_ERROR"})}
