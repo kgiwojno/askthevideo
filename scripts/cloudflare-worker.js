@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker — YouTube Transcript Proxy
  *
- * Fetches YouTube transcript data and returns it as JSON.
+ * Fetches YouTube transcript data via the Innertube API and returns it as JSON.
  * Deploy to Cloudflare Workers (free tier: 100k requests/day).
  *
  * Setup:
@@ -14,10 +14,13 @@
  *   7. Set TRANSCRIPT_PROXY_URL=<worker-url> and TRANSCRIPT_PROXY_SECRET=<secret> in Koyeb
  */
 
-const INNERTUBE_URL = "https://www.youtube.com/youtubei/v1/get_transcript";
+const INNERTUBE_API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const INNERTUBE_BASE = "https://www.youtube.com/youtubei/v1";
 const INNERTUBE_CLIENT = {
+  hl: "en",
+  gl: "US",
   clientName: "WEB",
-  clientVersion: "2.20240313.05.00",
+  clientVersion: "2.20241120.01.00",
 };
 
 export default {
@@ -57,62 +60,39 @@ export default {
     }
 
     try {
-      // Step 1: Fetch the video page to get serialized player data
-      const pageResp = await fetch(
-        `https://www.youtube.com/watch?v=${videoId}`,
+      // Step 1: Get video info to find caption tracks
+      const playerResp = await fetch(
+        `${INNERTUBE_BASE}/player?key=${INNERTUBE_API_KEY}`,
         {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { client: INNERTUBE_CLIENT },
+            videoId: videoId,
+          }),
         }
       );
 
-      if (!pageResp.ok) {
+      if (!playerResp.ok) {
         return Response.json(
-          { error: `YouTube returned ${pageResp.status}` },
+          { error: `YouTube player API returned ${playerResp.status}` },
           { status: 502 }
         );
       }
 
-      const html = await pageResp.text();
+      const playerData = await playerResp.json();
 
-      // Check if video is available
-      if (
-        html.includes('"playabilityStatus":{"status":"ERROR"') ||
-        html.includes('"playabilityStatus":{"status":"UNPLAYABLE"')
-      ) {
-        return Response.json(
-          { error: `Video ${videoId} is unavailable` },
-          { status: 404 }
-        );
-      }
-
-      // Extract captions from ytInitialPlayerResponse
-      const playerMatch = html.match(
-        /ytInitialPlayerResponse\s*=\s*(\{.+?\});/
-      );
-      if (!playerMatch) {
-        return Response.json(
-          { error: "Could not parse player response" },
-          { status: 502 }
-        );
-      }
-
-      let playerResponse;
-      try {
-        playerResponse = JSON.parse(playerMatch[1]);
-      } catch {
-        return Response.json(
-          { error: "Failed to parse player JSON" },
-          { status: 502 }
-        );
+      // Check playability
+      const playStatus = playerData?.playabilityStatus?.status;
+      if (playStatus === "ERROR" || playStatus === "UNPLAYABLE") {
+        const reason =
+          playerData?.playabilityStatus?.reason ||
+          `Video ${videoId} is unavailable`;
+        return Response.json({ error: reason }, { status: 404 });
       }
 
       const captions =
-        playerResponse?.captions?.playerCaptionsTracklistRenderer
-          ?.captionTracks;
+        playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
       if (!captions || captions.length === 0) {
         return Response.json(
           { error: `No captions available for video ${videoId}` },
@@ -120,18 +100,19 @@ export default {
         );
       }
 
-      // Prefer manual captions in English, fall back to auto-generated, then first available
+      // Prefer manual English, then auto English, then first available
       let track =
         captions.find((c) => c.languageCode === "en" && c.kind !== "asr") ||
         captions.find((c) => c.languageCode === "en") ||
         captions[0];
 
-      // Step 2: Fetch the actual transcript XML
-      const transcriptResp = await fetch(track.baseUrl + "&fmt=json3");
+      // Step 2: Fetch transcript data in JSON format
+      const transcriptUrl = track.baseUrl + "&fmt=json3";
+      const transcriptResp = await fetch(transcriptUrl);
 
       if (!transcriptResp.ok) {
         return Response.json(
-          { error: "Failed to fetch transcript data" },
+          { error: `Failed to fetch transcript data (${transcriptResp.status})` },
           { status: 502 }
         );
       }
@@ -160,16 +141,15 @@ export default {
       return Response.json(
         {
           video_id: videoId,
-          language: track.name?.simpleText || track.languageCode || "unknown",
+          language:
+            track.name?.simpleText || track.languageCode || "unknown",
           language_code: track.languageCode,
           is_generated: track.kind === "asr",
           snippets: snippets,
           duration_seconds: lastSnippet.start + lastSnippet.duration,
         },
         {
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-          },
+          headers: { "Access-Control-Allow-Origin": "*" },
         }
       );
     } catch (err) {
