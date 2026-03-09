@@ -50,7 +50,7 @@ class TestPostVideos:
     def test_invalid_url_returns_400(self, client):
         response = client.post("/api/videos", json={"url": "https://vimeo.com/123"})
         assert response.status_code == 400
-        assert response.json()["detail"]["code"] == "INVALID_URL"
+        assert response.json()["code"] == "INVALID_URL"
 
     def test_valid_url_calls_pipeline(self, client):
         mock_transcript = {
@@ -93,7 +93,7 @@ class TestPostAsk:
     def test_ask_without_videos_returns_400(self, client):
         response = client.post("/api/ask", json={"question": "What is this?"})
         assert response.status_code == 400
-        assert response.json()["detail"]["code"] == "NO_VIDEOS"
+        assert response.json()["code"] == "NO_VIDEOS"
 
     def test_ask_with_videos_returns_answer(self, client):
         # Pre-load a video into the session

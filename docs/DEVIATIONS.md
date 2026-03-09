@@ -189,6 +189,96 @@ EVENT_LOG_PATH = os.getenv("EVENT_LOG_PATH", _default_log)
 
 ---
 
+## 16. API cost tracking showing $0 — missing `record_tokens()` in tools
+
+**Discovered:** Admin panel always showed $0.00 estimated cost despite multiple queries being answered.
+
+**Root cause:** The `TokenTracker` LangChain callback on the agent LLM only tracked token usage from **agent routing calls** (deciding which tool to call and formatting the final answer). The 3 direct `client.messages.create()` calls in `src/tools.py` — which perform the actual heavy work (vector_search, summarize, compare) and consume the bulk of API tokens — never called `record_tokens()`.
+
+**Fix:**
+- Added `from src.metrics import record_tokens` to `src/tools.py`
+- Added `record_tokens(response.usage.input_tokens, response.usage.output_tokens)` after all 3 `client.messages.create()` calls in `src/tools.py`
+- Made `TokenTracker` in `src/agent.py` more robust with a `usage_metadata` fallback for LangChain ≥0.2
+
+**Note:** Changes were made in notebooks 04 and 05, then regenerated via `scripts/extract.py`.
+
+---
+
+## 17. Tool cache/API logging in event log
+
+**Spec said:** Nothing about logging tool cache hits.
+**Actual:** No way to tell if `summarize_video` or `list_topics` results came from Pinecone cache or a fresh Claude API call.
+
+**Fix:** Added `log_event("TOOL", source, ...)` calls in the `@tool` wrappers for `summarize_video` and `list_topics` in `api/routes/ask.py`. The `source` is `"cache"` or `"api"` based on the `cached` field returned by the underlying functions. Example log line:
+```
+TOOL    cache    —    summarize_video video=e-gwvmhyU7A
+```
+
+**Note:** `vector_search` and `compare_videos` always hit the API (no caching), so no log is emitted for those.
+
+---
+
+## 18. Log detail field — pipe character splitting bug
+
+**Spec said:** N/A (discovered during #16).
+**Actual:** `log_event()` uses `|` as the column delimiter. The initial detail string `"summarize_video | video=xxx"` contained a pipe, which caused `get_recent_events()` to split it into extra columns — the video ID was lost in the admin panel display.
+
+**Fix:** Changed detail format to use spaces instead of pipes: `"summarize_video video=xxx"`.
+
+---
+
+## 19. `scripts/extract.py` — handle string source format from NotebookEdit
+
+**Spec said:** N/A.
+**Actual:** The `NotebookEdit` tool writes cell source as a single string, while Jupyter saves it as a list of lines. The extractor only handled the list format — `source_lines[0]` on a string returns the first character, so `# @export` was never matched.
+
+**Fix:** Added type check:
+```python
+if isinstance(raw_source, str):
+    source_lines = raw_source.splitlines(keepends=True)
+else:
+    source_lines = raw_source
+```
+
+---
+
+## 20. Error response format — `HTTPException` detail wrapping
+
+**Spec said:** N/A (discovered from frontend testing).
+**Actual:** FastAPI's `HTTPException(400, detail={"error": "...", "code": "..."})` returns `{"detail": {"error": "...", "code": "..."}}`. The frontend reads `response.json().error` at the top level, which is `undefined`, so it always displayed "An unexpected error occurred."
+
+**Root cause:** FastAPI wraps the `detail` argument inside a `{"detail": ...}` envelope. The frontend expects `{"error": "...", "code": "..."}` at the top level.
+
+**Fix:** Added two exception handlers in `api/main.py`:
+1. `HTTPException` handler — returns `exc.detail` dict directly as the response body (no wrapping)
+2. Global `Exception` handler — catches uncaught errors and returns `{"error": "An internal error occurred.", "code": "INTERNAL_ERROR"}` with a 500 status, plus logs the error
+
+---
+
+## 21. Static file serving from `frontend/` root
+
+**Spec said:** Serve `frontend/assets/` via `StaticFiles` mount and `frontend/index.html` as catch-all.
+**Actual:** Files in the `frontend/` root directory (e.g. `favicon.png`, `favicon.ico`, `robots.txt`, `placeholder.svg`) were not accessible. Requests to `/favicon.png` hit the catch-all route and returned `index.html` instead.
+
+**Fix:** Updated the catch-all route in `api/main.py` to check if the requested path matches a real file in `frontend/` before falling back to `index.html`:
+```python
+if path:
+    static_file = Path("frontend") / path
+    if static_file.is_file():
+        return FileResponse(str(static_file))
+```
+
+---
+
+## 22. Catch-all for `fetch_transcript` unexpected exceptions
+
+**Spec said:** Only catch `ValueError` from `fetch_transcript`.
+**Actual:** Network errors, unexpected `youtube_transcript_api` exceptions, or other failures would bubble up as raw 500 errors with no user-friendly message.
+
+**Fix:** Added a catch-all `except Exception` after the `ValueError` handler in `api/routes/videos.py` that logs the error and returns a clear message: "Could not load video: {id}. The video may not exist or is not accessible."
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -208,3 +298,10 @@ EVENT_LOG_PATH = os.getenv("EVENT_LOG_PATH", _default_log)
 | 13 | `src/tools.py`, `src/agent.py` | Plain timestamps | Markdown link timestamps | Timestamps now clickable in UI |
 | 14 | `api/routes/ask.py` | All videos to agent | Only selected videos | Agent now respects selection state |
 | 15 | Frontend (Lovable) | N/A | React 18 setState batching bug | PATCH always sent `true`; fixed in frontend |
+| 16 | `src/tools.py`, `src/agent.py` | Only agent callback | Added `record_tokens()` to all 3 tool API calls | API cost was $0; bulk of tokens untracked |
+| 17 | `api/routes/ask.py` | No tool cache logging | `log_event("TOOL", cache/api)` | Visibility into cache hits vs API calls |
+| 18 | `api/routes/ask.py` | N/A | Removed `|` from log detail | Pipe split bug in `get_recent_events()` |
+| 19 | `scripts/extract.py` | List-of-lines source only | Handle string source too | NotebookEdit writes strings, not lists |
+| 20 | `api/main.py` | Default `HTTPException` handler | Custom handler strips `detail` wrapper | Frontend expects `{error, code}` at top level |
+| 21 | `api/main.py` | Only serve `assets/` + `index.html` | Serve any file from `frontend/` root | Favicon, robots.txt etc. now accessible |
+| 22 | `api/routes/videos.py` | Only catch `ValueError` | Catch-all for `fetch_transcript` | Prevents raw 500s for unexpected errors |

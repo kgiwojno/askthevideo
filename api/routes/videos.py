@@ -82,6 +82,9 @@ def post_video(
             raise HTTPException(400, detail={"error": msg, "code": "VIDEO_UNAVAILABLE"})
         else:
             raise HTTPException(400, detail={"error": msg, "code": "NO_TRANSCRIPT"})
+    except Exception as e:
+        log_event("ERROR", "video", get_client_ip(request), f"fetch_transcript failed: {type(e).__name__}: {str(e)[:80]}")
+        raise HTTPException(400, detail={"error": f"Could not load video: {video_id}. The video may not exist or is not accessible.", "code": "VIDEO_UNAVAILABLE"})
 
     # Duration check
     duration_seconds = transcript["duration_seconds"]
