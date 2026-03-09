@@ -270,12 +270,21 @@ if path:
 
 ---
 
-## 22. Catch-all for `fetch_transcript` unexpected exceptions
+## 22. Transcript error handling — `IpBlocked`, `RequestBlocked`, and catch-all
 
-**Spec said:** Only catch `ValueError` from `fetch_transcript`.
-**Actual:** Network errors, unexpected `youtube_transcript_api` exceptions, or other failures would bubble up as raw 500 errors with no user-friendly message.
+**Spec said:** Only catch `TranscriptsDisabled`, `NoTranscriptFound`, `VideoUnavailable` in `fetch_transcript`.
+**Actual:** YouTube can also throw `IpBlocked` and `RequestBlocked` (e.g. from cloud server IPs like Koyeb). These fell through to a generic catch-all that showed "Could not load video" with no useful detail. The user couldn't tell if the video didn't exist or if YouTube was blocking the server.
 
-**Fix:** Added a catch-all `except Exception` after the `ValueError` handler in `api/routes/videos.py` that logs the error and returns a clear message: "Could not load video: {id}. The video may not exist or is not accessible."
+**Fix (notebook 01 → `src/transcript.py`):**
+- Added `IpBlocked` and `RequestBlocked` imports
+- `IpBlocked` / `RequestBlocked` → `ValueError("YouTube is blocking transcript requests. Please try again later.")`
+- Generic `except Exception` → `ValueError("Could not fetch transcript for video {id}: {ExceptionType}")`
+- All exceptions now converted to `ValueError` with descriptive messages
+
+**Fix (`api/routes/videos.py`):**
+- All transcript errors logged to event log
+- IP blocking returns HTTP 503 with code `"IP_BLOCKED"`
+- Every error message is passed through to the frontend (no more generic fallback)
 
 ---
 
@@ -304,4 +313,4 @@ if path:
 | 19 | `scripts/extract.py` | List-of-lines source only | Handle string source too | NotebookEdit writes strings, not lists |
 | 20 | `api/main.py` | Default `HTTPException` handler | Custom handler strips `detail` wrapper | Frontend expects `{error, code}` at top level |
 | 21 | `api/main.py` | Only serve `assets/` + `index.html` | Serve any file from `frontend/` root | Favicon, robots.txt etc. now accessible |
-| 22 | `api/routes/videos.py` | Only catch `ValueError` | Catch-all for `fetch_transcript` | Prevents raw 500s for unexpected errors |
+| 22 | `src/transcript.py`, `api/routes/videos.py` | 3 exception types only | Added `IpBlocked`, `RequestBlocked`, catch-all | Descriptive errors for all failure modes |

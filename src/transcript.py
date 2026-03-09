@@ -5,6 +5,8 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     NoTranscriptFound,
     VideoUnavailable,
+    IpBlocked,
+    RequestBlocked,
 )
 import re
 
@@ -34,6 +36,10 @@ def fetch_transcript(video_id: str) -> dict:
         raise ValueError(f"No transcript found for video {video_id}")
     except VideoUnavailable:
         raise ValueError(f"Video {video_id} is unavailable")
+    except (IpBlocked, RequestBlocked):
+        raise ValueError(f"YouTube is blocking transcript requests. Please try again later.")
+    except Exception as e:
+        raise ValueError(f"Could not fetch transcript for video {video_id}: {type(e).__name__}")
     
     snippets = [
         {"text": s.text, "start": s.start, "duration": s.duration}
