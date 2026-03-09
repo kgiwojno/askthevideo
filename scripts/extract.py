@@ -69,7 +69,7 @@ def collect_imports(source: str) -> tuple[list[str], str]:
                 import_lines.extend(current_import)
                 current_import = []
                 in_multiline = False
-        elif stripped.startswith("import ") or stripped.startswith("from "):
+        elif not line[0:1].isspace() and (stripped.startswith("import ") or stripped.startswith("from ")):
             if "(" in line and ")" not in line:
                 # Opening of a multi-line import
                 in_multiline = True

@@ -6,6 +6,7 @@ langchain-anthropic
 langgraph
 pinecone
 youtube-transcript-api
+yt-dlp
 python-dotenv
 anthropic
 psutil
