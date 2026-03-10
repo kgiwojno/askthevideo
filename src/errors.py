@@ -1,31 +1,43 @@
-"""Error handling utilities."""
+"""Error handling utilities with Discord alerting and throttling."""
 
 import os
+import time
+import threading
 import urllib.request
-import urllib.error
 import json
-import traceback
+import logging
 
 from src.metrics import record_metric, log_event
 
+logger = logging.getLogger(__name__)
 
-class UserFacingError(Exception):
-    """An error with a user-readable message and machine code."""
-
-    def __init__(self, message: str, code: str):
-        super().__init__(message)
-        self.message = message
-        self.code = code
+# Throttle: one alert per error type per 10 minutes
+_THROTTLE_SECONDS = 600
+_last_alert: dict[str, float] = {}
+_throttle_lock = threading.Lock()
 
 
-def send_discord_alert(message: str) -> None:
-    """Post a notification to the Discord webhook if configured."""
+def send_discord_alert(message: str, alert_type: str = "general") -> None:
+    """Post a notification to the Discord webhook if configured.
+
+    Throttled: at most one alert per *alert_type* every 10 minutes.
+    """
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     if not webhook_url:
         return
+
+    now = time.time()
+    with _throttle_lock:
+        last = _last_alert.get(alert_type, 0)
+        if now - last < _THROTTLE_SECONDS:
+            logger.debug("Discord alert throttled: %s", alert_type)
+            return
+        _last_alert[alert_type] = now
+
     record_metric("alert_count")
-    log_event("ALERT", "discord", "—", message[:80])
-    payload = json.dumps({"content": message[:2000]}).encode()
+    log_event("ALERT", "discord", "—", f"[{alert_type}] {message[:80]}")
+
+    payload = json.dumps({"content": f"[AskTheVideo] {message[:1950]}"}).encode()
     try:
         req = urllib.request.Request(
             webhook_url,
@@ -35,19 +47,4 @@ def send_discord_alert(message: str) -> None:
         )
         urllib.request.urlopen(req, timeout=5)
     except Exception:
-        pass
-
-
-def safe_execute(func, *args, **kwargs):
-    """Execute func(*args, **kwargs), sending a Discord alert on failure.
-
-    Returns the result on success, or raises the original exception after alerting.
-    """
-    try:
-        return func(*args, **kwargs)
-    except Exception as exc:
-        record_metric("error_count")
-        log_event("ERROR", "exc", "—", f"{func.__name__}: {type(exc).__name__}: {str(exc)[:80]}")
-        alert = f"[AskTheVideo] Error in {func.__name__}:\n```\n{traceback.format_exc()[-1500:]}\n```"
-        send_discord_alert(alert)
-        raise
+        logger.warning("Failed to send Discord alert for %s", alert_type)

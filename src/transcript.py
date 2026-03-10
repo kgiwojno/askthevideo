@@ -11,7 +11,9 @@ from youtube_transcript_api._errors import (
     RequestBlocked,
 )
 from youtube_transcript_api.proxies import GenericProxyConfig
+from src.errors import send_discord_alert
 import re
+
 
 
 
@@ -62,9 +64,34 @@ def fetch_transcript(video_id: str) -> dict:
         raise ValueError(f"No transcript found for video {video_id}")
     except VideoUnavailable:
         raise ValueError(f"Video {video_id} is unavailable")
-    except (IpBlocked, RequestBlocked):
-        raise ValueError(f"YouTube is blocking transcript requests from this server. Please try again later.")
+    except (IpBlocked, RequestBlocked) as e:
+        send_discord_alert(
+            f"YouTube IP blocked for video {video_id}: {type(e).__name__}",
+            alert_type="ip_blocked",
+        )
+        raise ValueError(
+            "Temporary issue fetching this video. Please try again in a few seconds."
+        )
+    except (ConnectionError, OSError, TimeoutError) as e:
+        logger.error("Proxy connection failed for %s: %s", video_id, e)
+        send_discord_alert(
+            f"Proxy connection failed for {video_id}: {type(e).__name__}: {e}",
+            alert_type="proxy_down",
+        )
+        raise ValueError(
+            "Transcript service is temporarily unavailable. Please try again later."
+        )
     except Exception as e:
+        error_msg = str(e).lower()
+        if "proxy" in error_msg or "connect" in error_msg or "tunnel" in error_msg:
+            logger.error("Proxy error for %s: %s: %s", video_id, type(e).__name__, e)
+            send_discord_alert(
+                f"Proxy error for {video_id}: {type(e).__name__}: {e}",
+                alert_type="proxy_down",
+            )
+            raise ValueError(
+                "Transcript service is temporarily unavailable. Please try again later."
+            )
         raise ValueError(f"Could not fetch transcript for video {video_id}: {type(e).__name__}")
 
     snippets = [

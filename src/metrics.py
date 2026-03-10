@@ -87,11 +87,26 @@ def record_metric(key: str, increment: int = 1):
         _app_metrics[key] += increment
 
 
+BUDGET_ALERT_THRESHOLD = 0.80  # Alert at 80% of budget
+
+
 def record_tokens(input_tokens: int, output_tokens: int):
-    """Record token usage from a Claude API call."""
+    """Record token usage from a Claude API call. Alerts at 80% budget."""
     with _app_metrics["lock"]:
         _app_metrics["total_input_tokens"] += input_tokens
         _app_metrics["total_output_tokens"] += output_tokens
+        total_in = _app_metrics["total_input_tokens"]
+        total_out = _app_metrics["total_output_tokens"]
+
+    cost = (total_in / 1000 * COST_INPUT_PER_1K) + (total_out / 1000 * COST_OUTPUT_PER_1K)
+    if cost >= PROJECT_BUDGET * BUDGET_ALERT_THRESHOLD:
+        from src.errors import send_discord_alert
+        send_discord_alert(
+            f"Budget alert: ${cost:.2f} spent of ${PROJECT_BUDGET:.2f} "
+            f"({cost / PROJECT_BUDGET * 100:.0f}%). "
+            f"Tokens: {total_in:,} in / {total_out:,} out.",
+            alert_type="budget_threshold",
+        )
 
 
 def get_metrics() -> dict:

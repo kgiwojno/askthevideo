@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import admin, ask, auth, status, videos
 from src.metrics import log_event
+from src.errors import send_discord_alert
 
 load_dotenv()
 
@@ -26,6 +27,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     log_event("ERROR", "500", "—", f"{request.url.path}: {type(exc).__name__}: {str(exc)[:80]}")
+    send_discord_alert(
+        f"Uncaught 500: {request.url.path} — {type(exc).__name__}: {str(exc)[:200]}",
+        alert_type="uncaught_500",
+    )
     return JSONResponse(
         status_code=500,
         content={"error": "An internal error occurred. Please try again.", "code": "INTERNAL_ERROR"},

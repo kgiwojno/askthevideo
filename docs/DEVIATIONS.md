@@ -338,6 +338,59 @@ elif not line[0:1].isspace() and (stripped.startswith("import ") or stripped.sta
 
 ---
 
+## 26. Improved transcript error messages — proxy-aware user feedback
+
+**Spec said:** N/A.
+**Actual:** The initial error handling (#22) used a single generic message for `IpBlocked`/`RequestBlocked` and had no awareness of proxy failures. With the Webshare proxy (#24), two new failure modes exist: (a) the proxy IP gets temporarily blocked by YouTube (rotating to a new IP on retry fixes it), and (b) the proxy itself is down or unreachable.
+
+**Fix (notebook 01 → `src/transcript.py`):**
+
+| Exception | User message | Rationale |
+|-----------|-------------|-----------|
+| `IpBlocked`, `RequestBlocked` | "Temporary issue fetching this video. Please try again in a few seconds." | Webshare's `-rotate` suffix assigns a new residential IP on next request; retry likely succeeds |
+| `ConnectionError`, `OSError`, `TimeoutError` | "Transcript service is temporarily unavailable. Please try again later." | Proxy is down or unreachable |
+| Other exceptions containing "proxy", "connect", or "tunnel" | "Transcript service is temporarily unavailable. Please try again later." | Catches proxy auth failures, tunnel errors, etc. |
+| `TranscriptsDisabled`, `NoTranscriptFound`, `VideoUnavailable` | (unchanged — specific per-video messages) | Not proxy-related |
+| All other exceptions | "Could not fetch transcript for video {id}: {ErrorType}" | Unknown errors, logged for debugging |
+
+Proxy-related errors are also logged at `ERROR` level with full exception details for server-side debugging, while user-facing messages stay friendly and actionable.
+
+---
+
+## 27. `src/errors.py` — Discord alerting implemented with throttling
+
+**Spec said:** Implement critical alerting via Discord webhooks for production failures (credit exhaustion, quota limits, proxy failures).
+**Actual:** `src/errors.py` rewritten with throttled `send_discord_alert()`. Removed `UserFacingError` (redundant with `HTTPException` — see #20) and `safe_execute()` (replaced by direct alert calls at each error site).
+
+**Design decisions:**
+- **Direct calls over wrapper:** Each error site calls `send_discord_alert()` directly with a specific `alert_type`, giving precise control over message content and which errors trigger alerts.
+- **10-minute throttling:** Per `alert_type` — prevents Discord spam during cascading failures while still alerting on new error categories.
+- **Lazy import in `src/metrics.py`:** Budget threshold check uses `from src.errors import send_discord_alert` inside the function to avoid circular import (`metrics` ← `errors` ← `metrics`).
+
+**6 alert scenarios integrated:**
+
+| Alert type | Location | Trigger |
+|---|---|---|
+| `anthropic_api` | `src/tools.py` (`_claude_create`) | Any `APIError` from Claude (credits, rate limits, 500s) |
+| `ip_blocked` | `src/transcript.py` | `IpBlocked` or `RequestBlocked` from YouTube |
+| `proxy_down` | `src/transcript.py` | Proxy connection failures (timeout, refused, tunnel error) |
+| `pinecone_error` | `src/vectorstore.py` | `PineconeException` on embed, upsert, or query |
+| `uncaught_500` | `api/main.py` | Global exception handler catches unhandled errors |
+| `budget_threshold` | `src/metrics.py` | Estimated cost reaches 80% of $5 budget |
+
+**Files modified:** `src/errors.py` (rewritten), `src/transcript.py` (via notebook 01), `src/tools.py` (via notebook 04), `src/vectorstore.py` (via notebook 03), `api/main.py`, `src/metrics.py`
+
+---
+
+## 28. `APP_URL` constant — defined but not yet used
+
+**Spec said:** `APP_URL` for frontend wake-up ping (keeping Koyeb free tier alive) and redirect logic.
+**Actual:** Defined in `config/settings.py` as `"https://app.askthevideo.com"` but not referenced by any Python code. The frontend wake-up logic is client-side JavaScript (in `SYSTEM_DESIGN.md` examples), not server-side.
+
+**Status:** Kept for future use. Discord alerts (#27) were implemented without app links — alert messages are concise error descriptions, not navigation links.
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -367,3 +420,6 @@ elif not line[0:1].isspace() and (stripped.startswith("import ") or stripped.sta
 | 23 | `scripts/cloudflare-worker.js`, `scripts/gcf-transcript-proxy/` | Direct YouTube fetch only | Tried CF Worker, GCF proxy, yt-dlp — all blocked | YouTube blocks all datacenter IPs; resolved by #24 |
 | 24 | `src/transcript.py` (notebook 01) | Direct `YouTubeTranscriptApi()` | `_get_transcript_api()` with Webshare proxy | Residential proxy bypasses YouTube IP blocks on cloud deployments |
 | 25 | `scripts/extract.py` | Hoist all `import`/`from` lines | Only hoist non-indented imports | Indented imports (lazy/conditional) must stay in their function scope |
+| 26 | `src/transcript.py` (notebook 01) | Single `IpBlocked` message | Proxy-aware error messages with retry hints | Distinguishes IP rotation (retry) vs proxy down (wait) |
+| 27 | `src/errors.py` + 5 files | Discord alerts + `UserFacingError` + `safe_execute` | Throttled `send_discord_alert()` only, 6 alert sites | `UserFacingError` redundant (#20), `safe_execute` replaced by direct calls, 10-min throttling |
+| 28 | `config/settings.py` | `APP_URL` constant defined | Not used in Python code | Alerts implemented without app links; kept for future use |

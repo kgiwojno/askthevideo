@@ -2,12 +2,16 @@
 
 import os
 import time
-from anthropic import Anthropic
+import logging
+from anthropic import Anthropic, APIError
 from pinecone import Pinecone
 from src.metrics import record_tokens
+from src.errors import send_discord_alert
 
 
 
+
+logger = logging.getLogger(__name__)
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 EMBED_MODEL = "llama-text-embed-v2"
@@ -73,6 +77,20 @@ def _build_full_text(chunks):
     )
 
 
+def _claude_create(client, **kwargs):
+    """Call client.messages.create with Anthropic error alerting."""
+    try:
+        response = client.messages.create(**kwargs)
+        record_tokens(response.usage.input_tokens, response.usage.output_tokens)
+        return response
+    except APIError as e:
+        send_discord_alert(
+            f"Anthropic API error: {e.status_code} {type(e).__name__}: {str(e)[:200]}",
+            alert_type="anthropic_api",
+        )
+        raise
+
+
 def _fetch_or_generate_cached(index, client, video_id, record_suffix, system_prompt, user_prompt_prefix):
     """Shared pattern: check Pinecone cache, generate with Claude if missing, cache result."""
     record_id = f"{video_id}_{record_suffix}"
@@ -90,13 +108,13 @@ def _fetch_or_generate_cached(index, client, video_id, record_suffix, system_pro
 
     full_text = _build_full_text(chunks)
 
-    response = client.messages.create(
+    response = _claude_create(
+        client,
         model=CLAUDE_MODEL,
         max_tokens=2048,
         system=system_prompt,
         messages=[{"role": "user", "content": f"{user_prompt_prefix}\n\n{full_text}"}],
     )
-    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     result_text = response.content[0].text
 
@@ -145,7 +163,8 @@ def vector_search(pc, index, client, question, video_ids):
         context_parts.append(f"{header}\n{c['text_timestamped']}")
     context = "\n\n---\n\n".join(context_parts)
 
-    response = client.messages.create(
+    response = _claude_create(
+        client,
         model=CLAUDE_MODEL,
         max_tokens=1024,
         system="You answer questions about YouTube videos using transcript excerpts. "
@@ -157,7 +176,6 @@ def vector_search(pc, index, client, question, video_ids):
             "content": f"Transcript excerpts:\n\n{context}\n\n---\n\nQuestion: {question}",
         }],
     )
-    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     return {
         "answer": response.content[0].text,
@@ -241,7 +259,8 @@ def compare_videos(pc, index, client, question, video_ids):
 
     context = ("\n\n" + "=" * 40 + "\n\n").join(context_parts)
 
-    response = client.messages.create(
+    response = _claude_create(
+        client,
         model=CLAUDE_MODEL,
         max_tokens=1536,
         system="You compare what different YouTube videos say about a topic. "
@@ -254,7 +273,6 @@ def compare_videos(pc, index, client, question, video_ids):
             "content": f"Compare these videos on the topic:\n\nQuestion: {question}\n\n{context}",
         }],
     )
-    record_tokens(response.usage.input_tokens, response.usage.output_tokens)
 
     return {
         "answer": response.content[0].text,

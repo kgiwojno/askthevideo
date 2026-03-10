@@ -1,10 +1,16 @@
 """Auto-generated from notebooks. Do not edit directly."""
 
+import logging
 from pinecone import Pinecone
+from pinecone.exceptions import PineconeException
 import os
 import time
+from src.errors import send_discord_alert
 
 
+
+
+logger = logging.getLogger(__name__)
 
 EMBED_MODEL = "llama-text-embed-v2"
 EMBED_BATCH_SIZE = 50
@@ -31,11 +37,18 @@ def embed_texts(pc, texts: list[str], input_type: str = "passage") -> list[list[
     all_embeddings = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
         batch = texts[i:i + EMBED_BATCH_SIZE]
-        embs = pc.inference.embed(
-            model=EMBED_MODEL,
-            inputs=batch,
-            parameters={"input_type": input_type, "truncate": "END"},
-        )
+        try:
+            embs = pc.inference.embed(
+                model=EMBED_MODEL,
+                inputs=batch,
+                parameters={"input_type": input_type, "truncate": "END"},
+            )
+        except Exception as e:
+            send_discord_alert(
+                f"Pinecone embed failed: {type(e).__name__}: {str(e)[:200]}",
+                alert_type="pinecone_error",
+            )
+            raise
         all_embeddings.extend([e.values for e in embs])
     return all_embeddings
 
@@ -73,7 +86,14 @@ def upsert_chunks(pc, index, chunks: list[dict], video_id: str) -> int:
             },
         })
 
-    index.upsert(vectors=vectors, namespace=video_id)
+    try:
+        index.upsert(vectors=vectors, namespace=video_id)
+    except PineconeException as e:
+        send_discord_alert(
+            f"Pinecone upsert failed for {video_id}: {type(e).__name__}: {str(e)[:200]}",
+            alert_type="pinecone_error",
+        )
+        raise
     return len(vectors)
 
 
@@ -95,7 +115,14 @@ def upsert_metadata_record(index, video_id: str, metadata: dict):
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
     }
-    index.upsert(vectors=[record], namespace=video_id)
+    try:
+        index.upsert(vectors=[record], namespace=video_id)
+    except PineconeException as e:
+        send_discord_alert(
+            f"Pinecone metadata upsert failed for {video_id}: {type(e).__name__}: {str(e)[:200]}",
+            alert_type="pinecone_error",
+        )
+        raise
 
 
 def query_chunks(pc, index, question: str, video_id: str, top_k: int = 5) -> list[dict]:
@@ -111,12 +138,19 @@ def query_chunks(pc, index, question: str, video_id: str, top_k: int = 5) -> lis
         list of dicts with score + metadata
     """
     emb = embed_texts(pc, [question], input_type="query")[0]
-    results = index.query(
-        vector=emb,
-        namespace=video_id,
-        top_k=top_k,
-        include_metadata=True,
-    )
+    try:
+        results = index.query(
+            vector=emb,
+            namespace=video_id,
+            top_k=top_k,
+            include_metadata=True,
+        )
+    except PineconeException as e:
+        send_discord_alert(
+            f"Pinecone query failed for {video_id}: {type(e).__name__}: {str(e)[:200]}",
+            alert_type="pinecone_error",
+        )
+        raise
     return [
         {"score": m.score, "id": m.id, **m.metadata}
         for m in results.matches
