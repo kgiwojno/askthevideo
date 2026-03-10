@@ -302,9 +302,39 @@ if path:
 
 **Key finding:** YouTube's blocking operates at multiple levels — the Innertube player API, the timedtext endpoint, and even the `get_transcript` API all enforce IP restrictions. The blocking is also per-video: popular music videos are less restricted than other content.
 
-**Resolution:** All proxy/fallback code removed from production. Investigating residential proxy (Webshare) as the solution — route `youtube_transcript_api` requests through residential IPs that YouTube doesn't block.
+**Resolution:** All proxy/fallback code removed from production. Replaced with Webshare residential proxy (see #24).
 
 **Reference files kept:** `scripts/cloudflare-worker.js` and `scripts/gcf-transcript-proxy/` remain in the repo as reference for what was tried.
+
+---
+
+## 24. Webshare residential proxy for YouTube transcripts
+
+**Problem:** YouTube blocks transcript requests from all datacenter IPs (Koyeb, Cloudflare, and likely GCF). See #23 for the full investigation.
+
+**Fix:** Integrated Webshare rotating residential proxy directly into `youtube_transcript_api` via its built-in `proxy_config` parameter:
+
+- Added `_get_transcript_api()` helper in `src/transcript.py` (notebook 01, cell `21d441b1`)
+- Uses `GenericProxyConfig` (not `WebshareProxyConfig`) with `http://{username}:{password}@p.webshare.io:80/`
+- The `-rotate` suffix in the username tells Webshare to rotate IPs automatically
+- When `WEBSHARE_USERNAME` and `WEBSHARE_PASSWORD` env vars are missing (local dev), falls back to direct connection
+- `fetch_transcript()` now calls `_get_transcript_api()` instead of `YouTubeTranscriptApi()` directly
+
+**New env vars:** `WEBSHARE_USERNAME`, `WEBSHARE_PASSWORD`
+
+**Why this works:** Residential proxies use real ISP IP addresses that YouTube doesn't block (unlike datacenter IPs from cloud providers). The proxy is transparent to the `youtube_transcript_api` library — no code path changes needed, just a different HTTP transport.
+
+---
+
+## 25. `scripts/extract.py` — skip indented imports during hoisting
+
+**Spec said:** N/A (discovered when adding yt-dlp fallback, kept after cleanup).
+**Actual:** The `collect_imports()` function treated any line starting with `import` or `from` as a top-level import to hoist, including indented imports inside functions (e.g. `    import yt_dlp` as a lazy import). This broke the generated file by pulling the import out of its function scope.
+
+**Fix:** Added indentation check — only hoist imports that start at column 0:
+```python
+elif not line[0:1].isspace() and (stripped.startswith("import ") or stripped.startswith("from ")):
+```
 
 ---
 
@@ -334,4 +364,6 @@ if path:
 | 20 | `api/main.py` | Default `HTTPException` handler | Custom handler strips `detail` wrapper | Frontend expects `{error, code}` at top level |
 | 21 | `api/main.py` | Only serve `assets/` + `index.html` | Serve any file from `frontend/` root | Favicon, robots.txt etc. now accessible |
 | 22 | `src/transcript.py`, `api/routes/videos.py` | 3 exception types only | Added `IpBlocked`, `RequestBlocked`, catch-all | Descriptive errors for all failure modes |
-| 23 | `scripts/cloudflare-worker.js`, `scripts/gcf-transcript-proxy/` | Direct YouTube fetch only | Tried CF Worker, GCF proxy, yt-dlp — all blocked | YouTube blocks all datacenter IPs; pivoting to residential proxy |
+| 23 | `scripts/cloudflare-worker.js`, `scripts/gcf-transcript-proxy/` | Direct YouTube fetch only | Tried CF Worker, GCF proxy, yt-dlp — all blocked | YouTube blocks all datacenter IPs; resolved by #24 |
+| 24 | `src/transcript.py` (notebook 01) | Direct `YouTubeTranscriptApi()` | `_get_transcript_api()` with Webshare proxy | Residential proxy bypasses YouTube IP blocks on cloud deployments |
+| 25 | `scripts/extract.py` | Hoist all `import`/`from` lines | Only hoist non-indented imports | Indented imports (lazy/conditional) must stay in their function scope |

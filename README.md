@@ -273,6 +273,8 @@ Session ID is passed via `X-Session-ID` header. First request omits it; the resp
 | `DISCORD_WEBHOOK_URL` | Discord webhook for error alerts (optional) |
 | `ADMIN_TOKEN` | Admin token |
 | `VALID_ACCESS_KEYS` | Comma-separated list of valid access keys |
+| `WEBSHARE_USERNAME` | Webshare proxy username with `-rotate` suffix (optional, for cloud deployments) |
+| `WEBSHARE_PASSWORD` | Webshare proxy password (optional, for cloud deployments) |
 
 ---
 
