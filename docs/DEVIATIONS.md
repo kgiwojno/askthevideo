@@ -288,25 +288,23 @@ if path:
 
 ---
 
-## 23. Cloudflare Worker transcript proxy — YouTube IP block workaround
+## 23. YouTube IP blocking — attempted workarounds (abandoned)
 
-**Spec said:** N/A.
-**Actual:** YouTube blocks transcript requests from Koyeb's cloud server IPs (both US and EU regions). All new video loads fail with `IpBlocked`.
+**Problem:** YouTube blocks transcript requests from Koyeb's cloud server IPs (both US and EU regions). All new video loads fail with `IpBlocked`.
 
-**Fix:** Added a Cloudflare Worker as a transparent fallback proxy:
-- `scripts/cloudflare-worker.js` — standalone worker that fetches YouTube transcripts via the Innertube API and returns JSON
-- `src/transcript.py` — `_fetch_via_proxy()` function calls the worker when `IpBlocked`/`RequestBlocked` is caught
-- Worker is authenticated via `TRANSCRIPT_PROXY_SECRET` (Bearer token)
-- Two new env vars: `TRANSCRIPT_PROXY_URL`, `TRANSCRIPT_PROXY_SECRET`
+**Approaches tried and abandoned:**
 
-**Flow:**
-1. `fetch_transcript()` tries `youtube_transcript_api` directly
-2. If `IpBlocked` / `RequestBlocked` → calls `_fetch_via_proxy()`
-3. Proxy fetches from YouTube using Cloudflare's IP (not blocked)
-4. Returns same `{video_id, language, snippets, duration_seconds}` format
-5. Once cached in Pinecone, YouTube is never hit again for that video
+1. **Cloudflare Worker proxy** (`scripts/cloudflare-worker.js`) — Used YouTube's Innertube API with Android client. Worked for some videos (e.g. music videos) but YouTube also blocks Cloudflare IPs for many videos. The `baseUrl` timedtext endpoint returns empty (0 bytes) from Cloudflare's IPs. Tried multiple Innertube clients (WEB, ANDROID, IOS, TVHTML5), the `get_transcript` endpoint (requires session auth), and various cookie/User-Agent combinations. Only ANDROID and IOS return caption tracks, but the actual transcript fetch is blocked per-video.
 
-**Cost:** Free (Cloudflare Workers free tier: 100,000 requests/day)
+2. **Google Cloud Function proxy** (`scripts/gcf-transcript-proxy/`) — Same approach as Cloudflare but on Google Cloud (hypothesis: Google owns YouTube, so less likely to block). Code written and tested locally but not deployed — pivoted to approach 3 first.
+
+3. **yt-dlp fallback** — Added `yt-dlp` as a second extraction method in the fallback chain (`youtube_transcript_api` → `yt-dlp` → proxy). yt-dlp uses a different YouTube code path (player page parsing + subtitle URLs) but ultimately hits the same timedtext endpoint, so it's also blocked from datacenter IPs.
+
+**Key finding:** YouTube's blocking operates at multiple levels — the Innertube player API, the timedtext endpoint, and even the `get_transcript` API all enforce IP restrictions. The blocking is also per-video: popular music videos are less restricted than other content.
+
+**Resolution:** All proxy/fallback code removed from production. Investigating residential proxy (Webshare) as the solution — route `youtube_transcript_api` requests through residential IPs that YouTube doesn't block.
+
+**Reference files kept:** `scripts/cloudflare-worker.js` and `scripts/gcf-transcript-proxy/` remain in the repo as reference for what was tried.
 
 ---
 
@@ -336,4 +334,4 @@ if path:
 | 20 | `api/main.py` | Default `HTTPException` handler | Custom handler strips `detail` wrapper | Frontend expects `{error, code}` at top level |
 | 21 | `api/main.py` | Only serve `assets/` + `index.html` | Serve any file from `frontend/` root | Favicon, robots.txt etc. now accessible |
 | 22 | `src/transcript.py`, `api/routes/videos.py` | 3 exception types only | Added `IpBlocked`, `RequestBlocked`, catch-all | Descriptive errors for all failure modes |
-| 23 | `src/transcript.py`, `scripts/cloudflare-worker.js` | Direct YouTube fetch only | Cloudflare Worker proxy fallback | YouTube blocks cloud server IPs |
+| 23 | `scripts/cloudflare-worker.js`, `scripts/gcf-transcript-proxy/` | Direct YouTube fetch only | Tried CF Worker, GCF proxy, yt-dlp — all blocked | YouTube blocks all datacenter IPs; pivoting to residential proxy |

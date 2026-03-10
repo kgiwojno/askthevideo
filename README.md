@@ -273,30 +273,6 @@ Session ID is passed via `X-Session-ID` header. First request omits it; the resp
 | `DISCORD_WEBHOOK_URL` | Discord webhook for error alerts (optional) |
 | `ADMIN_TOKEN` | Admin token |
 | `VALID_ACCESS_KEYS` | Comma-separated list of valid access keys |
-| `TRANSCRIPT_PROXY_URL` | Cloudflare Worker URL for transcript proxy (optional, fallback for YouTube IP blocks) |
-| `TRANSCRIPT_PROXY_SECRET` | Shared secret for the transcript proxy (optional) |
-
----
-
-## YouTube transcript proxy (Cloudflare Worker)
-
-YouTube may block transcript requests from cloud server IPs. A Cloudflare Worker acts as a fallback proxy.
-
-**How it works:** The app tries fetching transcripts directly first. If YouTube blocks the request (`IpBlocked`/`RequestBlocked`), it automatically retries via the Cloudflare Worker.
-
-**Setup:**
-
-1. Create a free Cloudflare account at [dash.cloudflare.com](https://dash.cloudflare.com)
-2. Go to Workers & Pages → Create → Create Worker
-3. Deploy the default "Hello World", then click Edit Code
-4. Replace with the contents of `scripts/cloudflare-worker.js`
-5. Deploy, then go to Settings → Variables and Secrets
-6. Add `PROXY_SECRET` = any random string
-7. Set these env vars in your deployment:
-   - `TRANSCRIPT_PROXY_URL` = your worker URL (e.g. `https://youtube-transcript.yourname.workers.dev`)
-   - `TRANSCRIPT_PROXY_SECRET` = same secret from step 6
-
-Without these env vars, the app still works but will show an error if YouTube blocks the server IP.
 
 ---
 
