@@ -411,6 +411,30 @@ Key changes:
 
 ---
 
+## 30. Tool wrappers catch all exceptions to prevent cascade failure
+
+**Spec said:** N/A (bug discovered during stress testing).
+**Actual:** When a tool call fails mid-execution (e.g., Anthropic 429 rate limit), the conversation history in MemorySaver contains a `tool_use` without a matching `tool_result`. The Anthropic API rejects all subsequent messages in that thread, making the entire session unusable after a single tool error.
+
+**Fix:** All 5 LangChain `@tool` wrappers in `api/routes/ask.py` (`build_tools()`) now catch exceptions and return an error string instead of raising. The agent receives the error as a normal tool result and relays it to the user. Conversation context is fully preserved.
+
+```python
+@tool
+def vector_search(question: str) -> str:
+    try:
+        result = _vector_search(...)
+        return result.get("answer", "No relevant content found.")
+    except Exception as e:
+        log_event("ERROR", "tool", "—", f"vector_search: {type(e).__name__}: {str(e)[:80]}")
+        return f"Sorry, I couldn't complete the search right now. Error: {type(e).__name__}"
+```
+
+**Files modified:** `api/routes/ask.py` only. No changes to `src/tools.py`, `src/agent.py`, or notebooks.
+
+**Full details:** See `docs/BUG_CASCADE_FAILURE.md`.
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -444,3 +468,4 @@ Key changes:
 | 27 | `src/errors.py` + 5 files | Discord alerts + `UserFacingError` + `safe_execute` | Throttled `send_discord_alert()` only, 6 alert sites | `UserFacingError` redundant (#20), `safe_execute` replaced by direct calls, 10-min throttling |
 | 28 | `config/settings.py` | `APP_URL` constant defined | Not used in Python code | Alerts implemented without app links; kept for future use |
 | 29 | `src/agent.py` (notebook 05) | `create_react_agent` from `langgraph.prebuilt` | `create_agent` from `langchain.agents` | Deprecated in LangGraph V1.0; `prompt=` renamed to `system_prompt=` |
+| 30 | `api/routes/ask.py` | Tools could raise exceptions | All 5 tool wrappers catch exceptions, return error strings | Prevents cascade failure: dangling `tool_use` without `tool_result` broke sessions |

@@ -37,43 +37,63 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     @tool
     def vector_search(question: str) -> str:
         """Search transcript chunks across loaded videos and answer a specific question."""
-        result = _vector_search(pc, index, anthropic_client, question, selected_videos)
-        return result.get("answer", "No relevant content found.")
+        try:
+            result = _vector_search(pc, index, anthropic_client, question, selected_videos)
+            return result.get("answer", "No relevant content found.")
+        except Exception as e:
+            log_event("ERROR", "tool", "—", f"vector_search: {type(e).__name__}: {str(e)[:80]}")
+            return f"Sorry, I couldn't complete the search right now. Error: {type(e).__name__}"
 
     @tool
     def summarize_video(video_id: str) -> str:
         """Generate or retrieve a summary for a specific video by video_id."""
-        result = _summarize_video(index, anthropic_client, video_id)
-        source = "cache" if result.get("cached") else "api"
-        log_event("TOOL", source, "—", f"summarize_video video={video_id}")
-        return result.get("summary", "Could not generate summary.")
+        try:
+            result = _summarize_video(index, anthropic_client, video_id)
+            source = "cache" if result.get("cached") else "api"
+            log_event("TOOL", source, "—", f"summarize_video video={video_id}")
+            return result.get("summary", "Could not generate summary.")
+        except Exception as e:
+            log_event("ERROR", "tool", "—", f"summarize_video: {type(e).__name__}: {str(e)[:80]}")
+            return f"Sorry, I couldn't generate a summary right now. Error: {type(e).__name__}"
 
     @tool
     def list_topics(video_id: str) -> str:
         """List the main topics covered in a specific video by video_id."""
-        result = _get_topics(index, anthropic_client, video_id)
-        source = "cache" if result.get("cached") else "api"
-        log_event("TOOL", source, "—", f"list_topics video={video_id}")
-        return result.get("topics", "Could not retrieve topics.")
+        try:
+            result = _get_topics(index, anthropic_client, video_id)
+            source = "cache" if result.get("cached") else "api"
+            log_event("TOOL", source, "—", f"list_topics video={video_id}")
+            return result.get("topics", "Could not retrieve topics.")
+        except Exception as e:
+            log_event("ERROR", "tool", "—", f"list_topics: {type(e).__name__}: {str(e)[:80]}")
+            return f"Sorry, I couldn't retrieve topics right now. Error: {type(e).__name__}"
 
     @tool
     def compare_videos(question: str) -> str:
         """Compare what multiple loaded videos say about a topic or question."""
-        result = _compare_videos(pc, index, anthropic_client, question, selected_videos)
-        return result.get("answer", "No relevant content found.")
+        try:
+            result = _compare_videos(pc, index, anthropic_client, question, selected_videos)
+            return result.get("answer", "No relevant content found.")
+        except Exception as e:
+            log_event("ERROR", "tool", "—", f"compare_videos: {type(e).__name__}: {str(e)[:80]}")
+            return f"Sorry, I couldn't compare videos right now. Error: {type(e).__name__}"
 
     @tool
     def get_metadata(video_id: str) -> str:
         """Get metadata (title, channel, duration) for a specific video by video_id."""
-        result = _get_metadata(index, video_id)
-        if result["found"]:
-            m = result["metadata"]
-            return (
-                f"Title: {m.get('video_title', 'Unknown')}\n"
-                f"Channel: {m.get('channel', 'Unknown')}\n"
-                f"Duration: {m.get('duration_display', 'Unknown')}"
-            )
-        return f"No metadata found for video_id: {video_id}"
+        try:
+            result = _get_metadata(index, video_id)
+            if result["found"]:
+                m = result["metadata"]
+                return (
+                    f"Title: {m.get('video_title', 'Unknown')}\n"
+                    f"Channel: {m.get('channel', 'Unknown')}\n"
+                    f"Duration: {m.get('duration_display', 'Unknown')}"
+                )
+            return f"No metadata found for video_id: {video_id}"
+        except Exception as e:
+            log_event("ERROR", "tool", "—", f"get_metadata: {type(e).__name__}: {str(e)[:80]}")
+            return f"Sorry, I couldn't retrieve video metadata right now. Error: {type(e).__name__}"
 
     return [vector_search, summarize_video, list_topics, compare_videos, get_metadata]
 

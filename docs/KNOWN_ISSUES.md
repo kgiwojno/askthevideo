@@ -60,3 +60,31 @@ Non-critical issues identified during final review. Documented here for future r
 **Why not fixed now:** This is inherent to the notebook-first architecture. The `sys.path` cells are clearly labeled and placed immediately before the `@export` cells.
 
 **Future fix:** Could add a shared `notebooks/setup.py` helper that all notebooks import at the top, or use `%cd ..` magic in each notebook.
+
+---
+
+## 5. Agent-level LLM failure not covered by tool error handling
+
+**Location:** `api/routes/ask.py` — the `except Exception` blocks in `/ask` (line 126) and `/ask/stream` (line 194)
+
+**Issue:** The cascade failure fix (deviation #30) only covers tool-level exceptions. If the agent's own routing LLM call fails (e.g., Anthropic API is completely down, not just rate-limited), the exception happens *before* any `tool_use` is emitted, so it doesn't corrupt MemorySaver state. However, if a failure occurs *after* the agent emits a `tool_use` but *before* the tool executes (an unlikely but theoretically possible race condition in LangGraph internals), the dangling `tool_use` problem could still occur.
+
+**Impact:** Very low — this scenario requires a failure in the narrow window between LangGraph emitting the tool call and executing it. In practice, tool-level errors (rate limits, timeouts) are the real trigger, and those are now fully handled.
+
+**Why not fixed now:** The current fix covers all observed failure modes. The edge case is theoretical and would require modifying MemorySaver internals or resetting the thread_id as a fallback, which loses conversation context.
+
+**Future fix:** If this edge case is ever observed in production, add a fallback in the `except Exception` block that checks the MemorySaver state for dangling `tool_use` messages and either injects a synthetic `ToolMessage` or resets the thread_id. Monitor via the existing Discord alerting (`uncaught_500` alert type) — if sessions start breaking without tool-level errors in the event log, this edge case is the likely cause.
+
+---
+
+## 6. `datetime.utcnow()` deprecation warnings in session management
+
+**Location:** `api/session.py:15`
+
+**Issue:** Python 3.12 deprecates `datetime.datetime.utcnow()` in favor of `datetime.datetime.now(datetime.UTC)`. The test suite shows 18 `DeprecationWarning` instances from this call.
+
+**Impact:** None currently — the function works correctly. Will break in a future Python version when `utcnow()` is removed.
+
+**Why not fixed now:** Cosmetic warning only. No functional impact.
+
+**Future fix:** Replace `datetime.utcnow()` with `datetime.now(datetime.UTC)` in `api/session.py` and `tests/test_session.py`.
