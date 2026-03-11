@@ -391,6 +391,26 @@ Proxy-related errors are also logged at `ERROR` level with full exception detail
 
 ---
 
+## 29. `create_react_agent` → `create_agent` (LangGraph deprecation)
+
+**Spec said:** Use `create_react_agent` from `langgraph.prebuilt` with `prompt=` parameter.
+**Actual:** `create_react_agent` was deprecated in LangGraph V1.0 (to be removed in V2.0). Running the original import raises `LangGraphDeprecatedSinceV10`.
+
+**Fix:** Production code (`src/agent.py`, via notebook 05) uses the new API:
+```python
+from langchain.agents import create_agent
+agent = create_agent(llm, tools, system_prompt=SYSTEM_PROMPT, checkpointer=memory)
+```
+
+Key changes:
+- Import moved from `langgraph.prebuilt` → `langchain.agents`
+- Function renamed from `create_react_agent` → `create_agent`
+- Parameter renamed from `prompt=` → `system_prompt=`
+
+**Note:** Notebook 05 exploration cells still use the old `create_react_agent` to show the deprecation warning and migration journey. The `@export` production cell uses the new API.
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -423,3 +443,4 @@ Proxy-related errors are also logged at `ERROR` level with full exception detail
 | 26 | `src/transcript.py` (notebook 01) | Single `IpBlocked` message | Proxy-aware error messages with retry hints | Distinguishes IP rotation (retry) vs proxy down (wait) |
 | 27 | `src/errors.py` + 5 files | Discord alerts + `UserFacingError` + `safe_execute` | Throttled `send_discord_alert()` only, 6 alert sites | `UserFacingError` redundant (#20), `safe_execute` replaced by direct calls, 10-min throttling |
 | 28 | `config/settings.py` | `APP_URL` constant defined | Not used in Python code | Alerts implemented without app links; kept for future use |
+| 29 | `src/agent.py` (notebook 05) | `create_react_agent` from `langgraph.prebuilt` | `create_agent` from `langchain.agents` | Deprecated in LangGraph V1.0; `prompt=` renamed to `system_prompt=` |
