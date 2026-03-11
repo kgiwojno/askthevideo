@@ -117,7 +117,7 @@ Add a YouTube video to the session. Fetches transcript, chunks it, embeds in Pin
 | 400 | `NO_TRANSCRIPT` | Video has captions disabled |
 | 400 | `VIDEO_UNAVAILABLE` | Video deleted, private, or geo-blocked |
 | 400 | `TRANSCRIPT_ERROR` | Other transcript fetch error |
-| 403 | `VIDEO_LIMIT` | Free tier: 5 videos per session |
+| 403 | `VIDEO_LIMIT` | Free tier: 3 videos per session |
 | 403 | `DURATION_EXCEEDED` | Free tier: video exceeds 60 minutes |
 | 503 | `IP_BLOCKED` | YouTube blocking server IP |
 
@@ -266,7 +266,7 @@ Synchronous question answering. The agent picks the right tool, executes it, and
 |--------|------|------|
 | 400 | `NO_VIDEOS` | No videos loaded in session |
 | 400 | `QUESTION_TOO_LONG` | Question exceeds length limit |
-| 403 | `QUESTION_LIMIT` | Free tier: 10 questions per session |
+| 403 | `QUESTION_LIMIT` | Free tier: 5 questions per session |
 
 ---
 
@@ -382,8 +382,8 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
 
 | Limit | Value | Unlocked with access key |
 |-------|-------|--------------------------|
-| Videos per session | 5 | Unlimited |
-| Questions per session | 10 | Unlimited |
+| Videos per session | 3 | Unlimited |
+| Questions per session | 5 | Unlimited |
 | Max video duration | 60 minutes | Unlimited |
 | Session TTL | 2 hours | 2 hours |
 

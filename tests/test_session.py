@@ -49,8 +49,8 @@ class TestBuildLimits:
     def test_free_limits(self):
         _, session = get_or_create_session(None)
         limits = build_limits(session)
-        assert limits["videos_max"] == 5
-        assert limits["questions_max"] == 10
+        assert limits["videos_max"] == 3
+        assert limits["questions_max"] == 5
         assert limits["unlimited"] is False
         assert limits["videos_loaded"] == 0
         assert limits["questions_used"] == 0
