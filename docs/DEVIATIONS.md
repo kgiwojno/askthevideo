@@ -1,6 +1,6 @@
 # AskTheVideo — Phase 2 Build Deviations & Decisions
 
-This document records every place where the actual build differs from the original spec in `CLAUDE_CODE_HANDOFF.md` and `FASTAPI_BACKEND_SPEC.md`, plus bugs discovered and fixed during implementation and testing.
+This document records every place where the actual build differs from the original spec in `docs/spec/CLAUDE_CODE_HANDOFF.md` and `docs/spec/FASTAPI_BACKEND_SPEC.md`, plus bugs discovered and fixed during implementation and testing.
 
 ---
 
