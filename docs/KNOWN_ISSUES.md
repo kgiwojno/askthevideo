@@ -88,3 +88,21 @@ Non-critical issues identified during final review. Documented here for future r
 **Why not fixed now:** Cosmetic warning only. No functional impact.
 
 **Future fix:** Replace `datetime.utcnow()` with `datetime.now(datetime.UTC)` in `api/session.py` and `tests/test_session.py`.
+
+---
+
+## 7. No returning user identification across sessions
+
+**Location:** `api/session.py` — sessions are ephemeral (in-memory, 2-hour TTL, no persistence)
+
+**Issue:** There is no way to identify returning users across sessions. Each page load or session expiry creates a brand new session with no link to previous visits. Usage analytics (session depth, tool distribution, video loads) are all per-session with no user-level aggregation.
+
+**Impact:** None for current demo/portfolio use. Becomes important for commercial use — can't answer questions like "how many unique users?", "do users come back?", "what's the average sessions per user?".
+
+**Why not fixed now:** Out of scope for the current project phase. Would require persistent user identification (cookies, fingerprinting, or auth) and a user-level data model.
+
+**Future fix (commercial):**
+- Add a persistent anonymous user ID via a long-lived cookie (e.g. `atv_uid` UUID, 1-year expiry)
+- Store in a Supabase `users` table with `first_seen`, `last_seen`, `total_sessions`, `total_questions`
+- Link events to user ID for user-level analytics (retention, engagement, conversion from free to paid)
+- If auth is added (e.g. email login for paid tier), merge anonymous sessions into the authenticated user profile

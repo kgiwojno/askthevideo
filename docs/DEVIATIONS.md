@@ -495,6 +495,51 @@ def vector_search(question: str) -> str:
 
 **No schema changes required** — all data stored in existing `detail` text column. Queryable via SQL `substring()` with regex.
 
+Additionally, `get_recent_events()` now parses the `detail` string and returns structured fields (e.g. `tool`, `latency_ms`, `tokens_in`, `tokens_out`, `duration_s`, `questions`, `tier`) alongside the raw `detail`. This allows the admin frontend to display parsed columns without client-side regex.
+
+**Files modified:** `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py`, `src/metrics.py` (`_parse_detail()` + updated `get_recent_events()`)
+
+---
+
+## 34. Slow query Discord alert
+
+**Spec said:** 6 Discord alert scenarios.
+**Actual:** Added a 7th: `slow_query` — fires when a query takes longer than 60 seconds. Uses the same 10-minute per-type throttle as other alerts.
+
+**Why:** Queries over 60s indicate the user likely gave up waiting. Without this alert, slow queries would only be visible by manually checking event logs.
+
+**Files modified:** `api/routes/ask.py` (both `/ask` and `/ask/stream`)
+
+---
+
+## 35. Budget cycle tracking with cumulative cost and pre-Supabase offset
+
+**Spec said:** Fixed `PROJECT_BUDGET = $5.00` with single 80% threshold alert.
+**Actual:** Budget is now cycle-based — each $5 reload is a cycle that auto-detects from cumulative spend. Alert fires at 80% of each cycle.
+
+**How it works:**
+- `BUDGET_CYCLE = 5.00` — each reload amount
+- `INITIAL_COST_OFFSET` env var — pre-Supabase spend (set once: `$7.65`)
+- Cumulative cost = tracked tokens cost + offset
+- Cycle auto-detected: `cycle_start = floor(cumulative / 5) * 5`
+- Alert fires when `cumulative >= cycle_start + $4.00` (80%)
+- No env var updates needed on reload — cycles advance automatically
+
+**Admin API `cost` section now returns:**
+
+| Field | Description |
+|-------|-------------|
+| `estimated_cost` | Cumulative all-time spend |
+| `cost_offset` | Pre-Supabase historical spend |
+| `budget_cycle` | Reload amount ($5.00) |
+| `budget_cycle_spent` | Spent in current cycle |
+| `budget_cycle_remaining` | Remaining in current cycle |
+| `budget_total_loaded` | Total ever loaded (cycle ceiling) |
+
+**New env var:** `INITIAL_COST_OFFSET` (default `0`)
+
+**Files modified:** `src/metrics.py`, `api/routes/admin.py`, `tests/test_metrics.py`
+
 ---
 
 ## Summary table
@@ -533,4 +578,6 @@ def vector_search(question: str) -> str:
 | 30 | `api/routes/ask.py` | Tools could raise exceptions | All 5 tool wrappers catch exceptions, return error strings | Prevents cascade failure: dangling `tool_use` without `tool_result` broke sessions |
 | 31 | `src/metrics.py`, `tests/conftest.py` | In-memory metrics + local file log | Supabase persistent logging with dual-write + startup restore | Container restarts lost all historical data |
 | 32 | `config/settings.py` | 5 videos / 10 questions | 3 videos / 5 questions | Cost management during demo period |
-| 33 | `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py` | Basic event detail strings | Enriched with latency, tokens, tool, duration, session depth | Observability for performance and usage analytics |
+| 33 | `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py`, `src/metrics.py` | Basic event detail strings | Enriched with latency, tokens, tool, duration, session depth + parsed fields in API | Observability for performance and usage analytics |
+| 34 | `api/routes/ask.py` | 6 Discord alert types | 7th alert: `slow_query` (>60s) | Detect queries where user likely gave up |
+| 35 | `src/metrics.py`, `api/routes/admin.py` | Fixed $5 budget with single alert | Cycle-based: auto-detect $5 reloads, alert at 80% of each cycle, cumulative tracking | Budget reloads don't require config changes |

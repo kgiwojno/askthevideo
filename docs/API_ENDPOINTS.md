@@ -356,9 +356,12 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
   "cost": {
     "total_input_tokens": 1234567,
     "total_output_tokens": 567890,
-    "estimated_cost": 12.34,
-    "budget_total": 5.00,
-    "budget_remaining": -7.34
+    "estimated_cost": 8.25,
+    "cost_offset": 7.65,
+    "budget_cycle": 5.00,
+    "budget_cycle_spent": 3.25,
+    "budget_cycle_remaining": 1.75,
+    "budget_total_loaded": 10.00
   },
   "pinecone": {
     "cached_videos": 42,
@@ -411,6 +414,7 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
 | `SUPABASE_URL` | No | Supabase REST API base URL (persistent logging) |
 | `SUPABASE_KEY` | No | Supabase publishable key (RLS-protected) |
 | `APP_ENV` | No | Environment tag for Supabase logs (default: `local`, set to `production` on Koyeb) |
+| `INITIAL_COST_OFFSET` | No | Pre-Supabase cumulative API spend in USD (default: `0`) |
 | `DISCORD_WEBHOOK_URL` | No | Error alerting webhook |
 | `LANGSMITH_API_KEY` | No | LLM tracing |
 | `LANGSMITH_TRACING` | No | Enable/disable tracing |
