@@ -15,10 +15,17 @@ def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
     now = datetime.utcnow()
     expired = [k for k, v in sessions.items() if now - v["created_at"] > SESSION_TTL]
     for k in expired:
-        del sessions[k]
+        s = sessions.pop(k)
         with _app_metrics["lock"]:
             _app_metrics["active_sessions"] = max(0, _app_metrics["active_sessions"] - 1)
-        log_event("SESSION", "end", "—", f"active={_app_metrics['active_sessions']}")
+        questions = s["question_count"]
+        videos = len(s["loaded_videos"])
+        tier = "key" if s["unlimited"] else "free"
+        log_event(
+            "SESSION", "end", "—",
+            f"tier={tier} questions={questions} videos={videos} "
+            f"active={_app_metrics['active_sessions']}",
+        )
 
     if session_id and session_id in sessions:
         return session_id, sessions[session_id]

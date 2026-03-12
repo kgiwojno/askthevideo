@@ -435,6 +435,68 @@ def vector_search(question: str) -> str:
 
 ---
 
+## 31. Supabase persistent logging for metrics and events
+
+**Spec said:** In-memory metrics with local file event log.
+**Actual:** Metrics and events are volatile — container restart loses all historical data. Admin panel showed zeroes after each Koyeb redeploy.
+
+**Fix:** Added Supabase REST API integration to `src/metrics.py`:
+- **Dual-write:** `log_event()` writes to both local rotating file and Supabase `events` table
+- **Token snapshots:** `record_tokens()` persists cumulative token usage to `metrics_snapshots` table
+- **Startup restore:** `_restore_from_supabase()` seeds in-memory `_app_metrics` from Supabase on container start
+- **Read path:** `get_recent_events()` reads from Supabase (last 7 days) with local file fallback
+- **No SDK:** Uses `urllib.request` directly with publishable key + RLS policies (INSERT + SELECT only)
+- **Fire-and-forget:** Supabase writes run in daemon threads to avoid blocking requests
+- **Lazy config:** `_get_supabase_config()` reads env vars at call time (not import time) so `dotenv` has time to load
+- **Test guard:** Returns empty config when `TESTING=1` to prevent unit tests from writing to production Supabase
+
+**Supabase tables:**
+- `events` — columns: `id`, `created_at`, `event_type`, `subtype`, `ip`, `detail`, `environment`
+- `metrics_snapshots` — columns: `id`, `created_at`, `total_input_tokens`, `total_output_tokens`, `estimated_cost`, `total_queries`, `total_videos_loaded`, `active_sessions`, `ram_mb`, `environment`
+
+**Environment separation:** Both tables include an `environment` column (populated from `APP_ENV` env var, default `"local"`). All reads (admin panel, startup restore) filter by current environment, so local Docker logs never mix with production data.
+
+**RLS policies:** Publishable key can INSERT and SELECT only — no UPDATE/DELETE even if key leaks. Data cleanup requires Supabase SQL Editor.
+
+**New env vars:** `SUPABASE_URL`, `SUPABASE_KEY`, `APP_ENV`
+
+**New file:** `tests/conftest.py` — sets `TESTING=1` before any imports to prevent Supabase writes during testing.
+
+---
+
+## 32. Free tier limits reduced from 5/10 to 3/5
+
+**Spec said:** 5 videos per session, 10 questions per session.
+**Actual:** Reduced to 3 videos and 5 questions to manage costs during demo period.
+
+**Files modified:** `config/settings.py`, `tests/test_session.py`
+
+---
+
+## 33. Enhanced observability — per-query, per-tool, and session depth logging
+
+**Spec said:** Basic event logging (`log_event` with type/subtype/ip/detail).
+**Actual:** Event detail strings now include structured performance and usage data for analytics.
+
+**What was added:**
+
+| Data point | Where logged | Example detail |
+|------------|-------------|----------------|
+| Query latency (end-to-end) | `QUERY`/`KEY` events | `latency=14320ms` |
+| Per-query token usage | `QUERY`/`KEY` events | `tokens=8700/450` |
+| Tool used per query | `QUERY`/`KEY` events | `tool=vector_search` |
+| Tool execution latency | `TOOL` events | `vector_search latency=675ms` |
+| Video duration (new loads) | `VIDEO new` events | `duration=3600s` |
+| Transcript fetch time | `VIDEO new` events | `fetch=2150ms` |
+| Video duration (cache hits) | `VIDEO cache` events | `duration=4:33` |
+| Session engagement depth | `SESSION end` events | `tier=free questions=4 videos=2` |
+
+**Files modified:** `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py`
+
+**No schema changes required** — all data stored in existing `detail` text column. Queryable via SQL `substring()` with regex.
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -469,3 +531,6 @@ def vector_search(question: str) -> str:
 | 28 | `config/settings.py` | `APP_URL` constant defined | Not used in Python code | Alerts implemented without app links; kept for future use |
 | 29 | `src/agent.py` (notebook 05) | `create_react_agent` from `langgraph.prebuilt` | `create_agent` from `langchain.agents` | Deprecated in LangGraph V1.0; `prompt=` renamed to `system_prompt=` |
 | 30 | `api/routes/ask.py` | Tools could raise exceptions | All 5 tool wrappers catch exceptions, return error strings | Prevents cascade failure: dangling `tool_use` without `tool_result` broke sessions |
+| 31 | `src/metrics.py`, `tests/conftest.py` | In-memory metrics + local file log | Supabase persistent logging with dual-write + startup restore | Container restarts lost all historical data |
+| 32 | `config/settings.py` | 5 videos / 10 questions | 3 videos / 5 questions | Cost management during demo period |
+| 33 | `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py` | Basic event detail strings | Enriched with latency, tokens, tool, duration, session depth | Observability for performance and usage analytics |

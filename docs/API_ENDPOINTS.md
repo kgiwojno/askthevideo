@@ -43,9 +43,9 @@ Check API availability and current session status.
   "status": "ok",
   "limits": {
     "videos_loaded": 0,
-    "videos_max": 5,
+    "videos_max": 3,
     "questions_used": 0,
-    "questions_max": 10,
+    "questions_max": 5,
     "unlimited": false
   }
 }
@@ -408,6 +408,9 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
 | `ADMIN_TOKEN` | Yes | Admin panel access |
 | `WEBSHARE_USERNAME` | Production | Residential proxy username |
 | `WEBSHARE_PASSWORD` | Production | Residential proxy password |
+| `SUPABASE_URL` | No | Supabase REST API base URL (persistent logging) |
+| `SUPABASE_KEY` | No | Supabase publishable key (RLS-protected) |
+| `APP_ENV` | No | Environment tag for Supabase logs (default: `local`, set to `production` on Koyeb) |
 | `DISCORD_WEBHOOK_URL` | No | Error alerting webhook |
 | `LANGSMITH_API_KEY` | No | LLM tracing |
 | `LANGSMITH_TRACING` | No | Enable/disable tracing |

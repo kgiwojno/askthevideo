@@ -39,7 +39,7 @@ def test_log_event(tmp_path):
         log_event("QUERY", "free", "127.0.0.1", "test query")
         events = get_recent_events(10)
         assert len(events) >= 1
-        assert events[-1]["type"] == "QUERY"
+        assert any(e["type"] == "QUERY" for e in events)
     finally:
         metrics.EVENT_LOG_PATH = original_path
 
@@ -50,4 +50,6 @@ def test_get_metrics_has_computed_fields():
     assert "ram_mb" in m
     assert "cpu_percent" in m
     assert "estimated_cost" in m
-    assert "budget_remaining" in m
+    assert "budget_cycle_remaining" in m
+    assert "budget_cycle_spent" in m
+    assert "budget_total_loaded" in m

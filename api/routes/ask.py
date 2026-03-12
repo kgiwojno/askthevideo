@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -14,7 +15,10 @@ from api.session import get_or_create_session, build_limits
 from config.settings import MAX_QUESTIONS_FREE
 from api.utils import get_client_ip
 from src.agent import create_askthevideo_agent
-from src.metrics import record_metric, log_event
+from src.errors import send_discord_alert
+from src.metrics import record_metric, log_event, get_metrics
+
+SLOW_QUERY_THRESHOLD_MS = 60_000  # Alert if query takes >60s
 from src.tools import (
     vector_search as _vector_search,
     summarize_video as _summarize_video,
@@ -38,7 +42,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def vector_search(question: str) -> str:
         """Search transcript chunks across loaded videos and answer a specific question."""
         try:
+            t0 = time.monotonic()
             result = _vector_search(pc, index, anthropic_client, question, selected_videos)
+            ms = int((time.monotonic() - t0) * 1000)
+            log_event("TOOL", "api", "—", f"vector_search latency={ms}ms")
             return result.get("answer", "No relevant content found.")
         except Exception as e:
             log_event("ERROR", "tool", "—", f"vector_search: {type(e).__name__}: {str(e)[:80]}")
@@ -48,9 +55,11 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def summarize_video(video_id: str) -> str:
         """Generate or retrieve a summary for a specific video by video_id."""
         try:
+            t0 = time.monotonic()
             result = _summarize_video(index, anthropic_client, video_id)
+            ms = int((time.monotonic() - t0) * 1000)
             source = "cache" if result.get("cached") else "api"
-            log_event("TOOL", source, "—", f"summarize_video video={video_id}")
+            log_event("TOOL", source, "—", f"summarize_video video={video_id} latency={ms}ms")
             return result.get("summary", "Could not generate summary.")
         except Exception as e:
             log_event("ERROR", "tool", "—", f"summarize_video: {type(e).__name__}: {str(e)[:80]}")
@@ -60,9 +69,11 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def list_topics(video_id: str) -> str:
         """List the main topics covered in a specific video by video_id."""
         try:
+            t0 = time.monotonic()
             result = _get_topics(index, anthropic_client, video_id)
+            ms = int((time.monotonic() - t0) * 1000)
             source = "cache" if result.get("cached") else "api"
-            log_event("TOOL", source, "—", f"list_topics video={video_id}")
+            log_event("TOOL", source, "—", f"list_topics video={video_id} latency={ms}ms")
             return result.get("topics", "Could not retrieve topics.")
         except Exception as e:
             log_event("ERROR", "tool", "—", f"list_topics: {type(e).__name__}: {str(e)[:80]}")
@@ -72,7 +83,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def compare_videos(question: str) -> str:
         """Compare what multiple loaded videos say about a topic or question."""
         try:
+            t0 = time.monotonic()
             result = _compare_videos(pc, index, anthropic_client, question, selected_videos)
+            ms = int((time.monotonic() - t0) * 1000)
+            log_event("TOOL", "api", "—", f"compare_videos latency={ms}ms")
             return result.get("answer", "No relevant content found.")
         except Exception as e:
             log_event("ERROR", "tool", "—", f"compare_videos: {type(e).__name__}: {str(e)[:80]}")
@@ -82,7 +96,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
     def get_metadata(video_id: str) -> str:
         """Get metadata (title, channel, duration) for a specific video by video_id."""
         try:
+            t0 = time.monotonic()
             result = _get_metadata(index, video_id)
+            ms = int((time.monotonic() - t0) * 1000)
+            log_event("TOOL", "local", "—", f"get_metadata video={video_id} latency={ms}ms")
             if result["found"]:
                 m = result["metadata"]
                 return (
@@ -138,6 +155,10 @@ def post_ask(
     agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
 
+    # Capture token state before query for per-query delta
+    metrics_before = get_metrics()
+    t0 = time.monotonic()
+
     try:
         result = agent.invoke(
             {"messages": [("user", question)]},
@@ -145,6 +166,11 @@ def post_ask(
         )
     except Exception as e:
         raise HTTPException(500, detail={"error": str(e), "code": "INTERNAL_ERROR"})
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    metrics_after = get_metrics()
+    tokens_in = metrics_after["total_input_tokens"] - metrics_before["total_input_tokens"]
+    tokens_out = metrics_after["total_output_tokens"] - metrics_before["total_output_tokens"]
 
     messages = result.get("messages", [])
     answer = ""
@@ -155,17 +181,28 @@ def post_ask(
         if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content:
             answer = msg.content
 
+    if latency_ms > SLOW_QUERY_THRESHOLD_MS:
+        send_discord_alert(
+            f"Slow query: {latency_ms / 1000:.1f}s — tool={tool_used or 'none'} "
+            f"tokens={tokens_in}/{tokens_out} q=\"{question[:50]}\"",
+            alert_type="slow_query",
+        )
+
     session["question_count"] += 1
     session["chat_history"].append({"role": "user", "content": question})
     session["chat_history"].append({"role": "assistant", "content": answer})
 
     record_metric("total_queries")
     ip = get_client_ip(request)
+    query_detail = (
+        f'"{question[:50]}" tool={tool_used or "none"} '
+        f"latency={latency_ms}ms tokens={tokens_in}/{tokens_out}"
+    )
     if session["unlimited"]:
         record_metric("key_queries")
-        log_event("KEY", "query", ip, f'"{question[:50]}" | count={session["question_count"]}')
+        log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}")
     else:
-        log_event("QUERY", "free", ip, f'"{question[:50]}"')
+        log_event("QUERY", "free", ip, query_detail)
 
     return {
         "session_id": sid,
@@ -197,6 +234,10 @@ async def post_ask_stream(
     tools = build_tools(selected, pc, index, anthropic_client)
     agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
+
+    # Capture token state before query for per-query delta
+    metrics_before = get_metrics()
+    t0 = time.monotonic()
 
     async def event_generator() -> AsyncGenerator:
         queue: asyncio.Queue = asyncio.Queue()
@@ -263,17 +304,33 @@ async def post_ask_stream(
 
             await task
 
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            metrics_after = get_metrics()
+            tokens_in = metrics_after["total_input_tokens"] - metrics_before["total_input_tokens"]
+            tokens_out = metrics_after["total_output_tokens"] - metrics_before["total_output_tokens"]
+
+            if latency_ms > SLOW_QUERY_THRESHOLD_MS:
+                send_discord_alert(
+                    f"Slow query: {latency_ms / 1000:.1f}s — tool={tool_used or 'none'} "
+                    f"tokens={tokens_in}/{tokens_out} q=\"{question[:50]}\"",
+                    alert_type="slow_query",
+                )
+
             session["question_count"] += 1
             session["chat_history"].append({"role": "user", "content": question})
             session["chat_history"].append({"role": "assistant", "content": full_answer})
 
             record_metric("total_queries")
             ip = get_client_ip(request)
+            query_detail = (
+                f'"{question[:50]}" tool={tool_used or "none"} '
+                f"latency={latency_ms}ms tokens={tokens_in}/{tokens_out}"
+            )
             if session["unlimited"]:
                 record_metric("key_queries")
-                log_event("KEY", "query", ip, f'"{question[:50]}" | count={session["question_count"]}')
+                log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}")
             else:
-                log_event("QUERY", "free", ip, f'"{question[:50]}"')
+                log_event("QUERY", "free", ip, query_detail)
 
             yield {"data": json.dumps({"limits": build_limits(session)})}
 

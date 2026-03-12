@@ -1,5 +1,7 @@
 """POST/GET/DELETE/PATCH /api/videos endpoints."""
 
+import time
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
@@ -68,10 +70,14 @@ def post_video(
             session["agent"] = None  # force agent rebuild
             record_metric("total_videos_loaded")
             ip = get_client_ip(request)
-            log_event("VIDEO", "cache", ip, f'"{video_info["title"]}" | video={video_id}')
+            log_event(
+                "VIDEO", "cache", ip,
+                f'"{video_info["title"]}" video={video_id} duration={meta.get("duration_display", "?")}',
+            )
             return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
     # New video — fetch transcript
+    t0 = time.monotonic()
     try:
         transcript = fetch_transcript(video_id)
     except ValueError as e:
@@ -129,8 +135,13 @@ def post_video(
 
     record_metric("total_videos_loaded")
     record_metric("total_videos_cached")
+    fetch_ms = int((time.monotonic() - t0) * 1000)
     ip = get_client_ip(request)
-    log_event("VIDEO", "new", ip, f'"{oembed["video_title"]}" | video={video_id} | chunks={len(chunks)}')
+    log_event(
+        "VIDEO", "new", ip,
+        f'"{oembed["video_title"]}" video={video_id} chunks={len(chunks)} '
+        f"duration={duration_seconds}s fetch={fetch_ms}ms",
+    )
 
     return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
