@@ -76,7 +76,7 @@ event_handler.setFormatter(logging.Formatter("%(message)s"))
 event_logger.addHandler(event_handler)
 
 
-def log_event(event_type: str, subtype: str, ip: str = "—", detail: str = ""):
+def log_event(event_type: str, subtype: str, ip: str = "—", detail: str = "", user_id: str = ""):
     """Write structured event to rotating log file and Supabase.
 
     Event types: QUERY, VIDEO, SESSION, ERROR, KEY, ALERT, TOOL
@@ -85,13 +85,112 @@ def log_event(event_type: str, subtype: str, ip: str = "—", detail: str = ""):
     line = f"{ts} | {event_type:<7} | {subtype:<6} | {ip:<15} | {detail}"
     event_logger.info(line)
 
-    _post_to_supabase("events", {
+    row = {
         "event_type": event_type,
         "subtype": subtype,
         "ip": ip,
         "detail": detail,
         "environment": _get_app_env(),
-    })
+    }
+    if user_id:
+        row["user_id"] = user_id
+    _post_to_supabase("events", row)
+
+
+def upsert_user(user_id: str):
+    """Create or update a user record in Supabase on session start."""
+    if not user_id:
+        return
+    env = _get_app_env()
+    # Try to fetch existing user
+    existing = _supabase_request(
+        "GET",
+        f"/rest/v1/users?uid=eq.{user_id}&environment=eq.{env}&select=uid,total_sessions",
+    )
+    if existing and isinstance(existing, list) and existing:
+        # Returning user — increment sessions, update last_seen
+        current_sessions = existing[0].get("total_sessions", 0)
+        url_base, key = _get_supabase_config()
+        if url_base and key:
+            import urllib.parse
+            path = f"/rest/v1/users?uid=eq.{urllib.parse.quote(user_id)}&environment=eq.{env}"
+            headers = {
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            }
+            body = json.dumps({
+                "last_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "total_sessions": current_sessions + 1,
+            }).encode()
+            try:
+                req = urllib.request.Request(
+                    f"{url_base}{path}", data=body, headers=headers, method="PATCH"
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                _supabase_logger.debug("User upsert PATCH failed: %s", e)
+    else:
+        # New user
+        _supabase_request("POST", "/rest/v1/users", {
+            "uid": user_id,
+            "environment": env,
+        })
+
+
+def increment_user_stat(user_id: str, field: str, increment: int = 1):
+    """Increment a numeric field on a user record (e.g. total_questions, total_videos)."""
+    if not user_id:
+        return
+    env = _get_app_env()
+    existing = _supabase_request(
+        "GET",
+        f"/rest/v1/users?uid=eq.{user_id}&environment=eq.{env}&select=uid,{field}",
+    )
+    if existing and isinstance(existing, list) and existing:
+        current = existing[0].get(field, 0)
+        url_base, key = _get_supabase_config()
+        if url_base and key:
+            import urllib.parse
+            path = f"/rest/v1/users?uid=eq.{urllib.parse.quote(user_id)}&environment=eq.{env}"
+            headers = {
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            }
+            body = json.dumps({field: current + increment}).encode()
+            try:
+                req = urllib.request.Request(
+                    f"{url_base}{path}", data=body, headers=headers, method="PATCH"
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                _supabase_logger.debug("User stat increment failed: %s", e)
+
+
+def get_user_stats() -> dict:
+    """Fetch user statistics for admin dashboard."""
+    env = _get_app_env()
+    all_users = _supabase_request(
+        "GET",
+        f"/rest/v1/users?environment=eq.{env}&select=uid,total_sessions,total_questions,total_videos,first_seen,last_seen",
+    )
+    if not all_users or not isinstance(all_users, list):
+        return {"total_users": 0, "returning_users": 0, "avg_sessions_per_user": 0, "avg_questions_per_user": 0}
+
+    total = len(all_users)
+    returning = sum(1 for u in all_users if u.get("total_sessions", 0) > 1)
+    avg_sessions = round(sum(u.get("total_sessions", 0) for u in all_users) / total, 1) if total else 0
+    avg_questions = round(sum(u.get("total_questions", 0) for u in all_users) / total, 1) if total else 0
+
+    return {
+        "total_users": total,
+        "returning_users": returning,
+        "avg_sessions_per_user": avg_sessions,
+        "avg_questions_per_user": avg_questions,
+    }
 
 
 import re

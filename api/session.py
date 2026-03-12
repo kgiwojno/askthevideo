@@ -4,13 +4,13 @@ import uuid
 from datetime import datetime, timedelta
 
 from config.settings import SESSION_TTL_HOURS
-from src.metrics import record_metric, log_event, _app_metrics
+from src.metrics import record_metric, log_event, upsert_user, _app_metrics
 
 sessions: dict[str, dict] = {}
 SESSION_TTL = timedelta(hours=SESSION_TTL_HOURS)
 
 
-def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
+def get_or_create_session(session_id: str | None, user_id: str = "") -> tuple[str, dict]:
     """Get existing session or create new one. Cleans expired sessions."""
     now = datetime.utcnow()
     expired = [k for k, v in sessions.items() if now - v["created_at"] > SESSION_TTL]
@@ -25,10 +25,15 @@ def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
             "SESSION", "end", "—",
             f"tier={tier} questions={questions} videos={videos} "
             f"active={_app_metrics['active_sessions']}",
+            user_id=s.get("user_id", ""),
         )
 
     if session_id and session_id in sessions:
-        return session_id, sessions[session_id]
+        session = sessions[session_id]
+        # Update user_id if provided and not yet set
+        if user_id and not session.get("user_id"):
+            session["user_id"] = user_id
+        return session_id, session
 
     new_id = str(uuid.uuid4())
     sessions[new_id] = {
@@ -40,9 +45,16 @@ def get_or_create_session(session_id: str | None) -> tuple[str, dict]:
         "agent": None,
         "agent_thread_id": new_id,
         "_agent_videos": [],
+        "user_id": user_id,
     }
     record_metric("active_sessions")
-    log_event("SESSION", "start", "—", f"active={_app_metrics['active_sessions']}")
+    log_event("SESSION", "start", "—", f"active={_app_metrics['active_sessions']}", user_id=user_id)
+
+    # Upsert user record in Supabase (fire-and-forget)
+    if user_id:
+        import threading
+        threading.Thread(target=upsert_user, args=(user_id,), daemon=True).start()
+
     return new_id, sessions[new_id]
 
 

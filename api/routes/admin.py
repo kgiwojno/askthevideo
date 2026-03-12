@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from api.dependencies import get_pinecone
-from src.metrics import get_metrics, get_recent_events, BUDGET_CYCLE
+from src.metrics import get_metrics, get_recent_events, get_user_stats, BUDGET_CYCLE
 
 router = APIRouter()
 
@@ -51,6 +51,7 @@ def admin_metrics(x_admin_token: str = Header(None, alias="X-Admin-Token")):
     m = get_metrics()
     events = get_recent_events(50)
     pc_stats = get_pinecone_stats()
+    user_stats = get_user_stats()
 
     return {
         "realtime": {
@@ -83,6 +84,7 @@ def admin_metrics(x_admin_token: str = Header(None, alias="X-Admin-Token")):
             "total_loaded": m["budget_total_loaded"],
         },
         "pinecone": pc_stats,
+        "users": user_stats,
         "events": events,
         "last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

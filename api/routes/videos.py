@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from api.dependencies import get_pinecone
 from api.session import get_or_create_session, build_limits
 from api.utils import get_client_ip
-from src.metrics import record_metric, log_event
+from src.metrics import record_metric, log_event, increment_user_stat
 from config.settings import MAX_VIDEOS_FREE, MAX_DURATION_FREE, CHUNK_WINDOW_SECONDS, CHUNK_CARRY_SNIPPETS
 from src.chunking import chunk_transcript, format_time
 from src.metadata import fetch_video_metadata
@@ -31,8 +31,9 @@ def post_video(
     body: VideoRequest,
     request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
+    x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
 
     # Validate URL
     try:
@@ -70,10 +71,14 @@ def post_video(
             session["agent"] = None  # force agent rebuild
             record_metric("total_videos_loaded")
             ip = get_client_ip(request)
+            uid = session.get("user_id", "")
             log_event(
                 "VIDEO", "cache", ip,
                 f'"{video_info["title"]}" video={video_id} duration={meta.get("duration_display", "?")}',
+                user_id=uid,
             )
+            import threading
+            threading.Thread(target=increment_user_stat, args=(uid, "total_videos"), daemon=True).start()
             return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
     # New video — fetch transcript
@@ -137,11 +142,15 @@ def post_video(
     record_metric("total_videos_cached")
     fetch_ms = int((time.monotonic() - t0) * 1000)
     ip = get_client_ip(request)
+    uid = session.get("user_id", "")
     log_event(
         "VIDEO", "new", ip,
         f'"{oembed["video_title"]}" video={video_id} chunks={len(chunks)} '
         f"duration={duration_seconds}s fetch={fetch_ms}ms",
+        user_id=uid,
     )
+    import threading
+    threading.Thread(target=increment_user_stat, args=(uid, "total_videos"), daemon=True).start()
 
     return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 

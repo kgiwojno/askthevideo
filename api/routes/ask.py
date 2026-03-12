@@ -16,7 +16,7 @@ from config.settings import MAX_QUESTIONS_FREE
 from api.utils import get_client_ip
 from src.agent import create_askthevideo_agent
 from src.errors import send_discord_alert
-from src.metrics import record_metric, log_event, get_metrics
+from src.metrics import record_metric, log_event, get_metrics, increment_user_stat
 
 SLOW_QUERY_THRESHOLD_MS = 60_000  # Alert if query takes >60s
 from src.tools import (
@@ -137,8 +137,9 @@ def post_ask(
     body: AskRequest,
     request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
+    x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
     _check_preconditions(session)
 
     try:
@@ -194,15 +195,19 @@ def post_ask(
 
     record_metric("total_queries")
     ip = get_client_ip(request)
+    uid = session.get("user_id", "")
     query_detail = (
         f'"{question[:50]}" tool={tool_used or "none"} '
         f"latency={latency_ms}ms tokens={tokens_in}/{tokens_out}"
     )
     if session["unlimited"]:
         record_metric("key_queries")
-        log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}")
+        log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}", user_id=uid)
     else:
-        log_event("QUERY", "free", ip, query_detail)
+        log_event("QUERY", "free", ip, query_detail, user_id=uid)
+
+    import threading
+    threading.Thread(target=increment_user_stat, args=(uid, "total_questions"), daemon=True).start()
 
     return {
         "session_id": sid,
@@ -217,8 +222,9 @@ async def post_ask_stream(
     body: AskRequest,
     request: Request,
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
+    x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
     _check_preconditions(session)
 
     try:
@@ -322,15 +328,19 @@ async def post_ask_stream(
 
             record_metric("total_queries")
             ip = get_client_ip(request)
+            uid = session.get("user_id", "")
             query_detail = (
                 f'"{question[:50]}" tool={tool_used or "none"} '
                 f"latency={latency_ms}ms tokens={tokens_in}/{tokens_out}"
             )
             if session["unlimited"]:
                 record_metric("key_queries")
-                log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}")
+                log_event("KEY", "query", ip, f"{query_detail} count={session['question_count']}", user_id=uid)
             else:
-                log_event("QUERY", "free", ip, query_detail)
+                log_event("QUERY", "free", ip, query_detail, user_id=uid)
+
+            import threading
+            threading.Thread(target=increment_user_stat, args=(uid, "total_questions"), daemon=True).start()
 
             yield {"data": json.dumps({"limits": build_limits(session)})}
 
