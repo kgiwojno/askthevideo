@@ -91,18 +91,22 @@ Non-critical issues identified during final review. Documented here for future r
 
 ---
 
-## 7. No returning user identification across sessions
+## 7. Anonymous user tracking — partially resolved
 
-**Location:** `api/session.py` — sessions are ephemeral (in-memory, 2-hour TTL, no persistence)
+**Location:** `src/metrics.py`, `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`
 
-**Issue:** There is no way to identify returning users across sessions. Each page load or session expiry creates a brand new session with no link to previous visits. Usage analytics (session depth, tool distribution, video loads) are all per-session with no user-level aggregation.
+**Status:** Partially resolved. Anonymous user tracking is now implemented via `localStorage` UUID + `X-User-ID` header + Supabase `users` table. No cookies — no consent banner needed.
 
-**Impact:** None for current demo/portfolio use. Becomes important for commercial use — can't answer questions like "how many unique users?", "do users come back?", "what's the average sessions per user?".
+**What's implemented:**
+- Frontend generates UUID on first visit, stores in `localStorage` as `atv_uid`
+- Backend tracks `total_sessions`, `total_questions`, `total_videos`, `first_seen`, `last_seen` per user
+- All events tagged with `user_id` in Supabase
+- Admin panel shows: total users, returning users, avg sessions/user, avg questions/user
 
-**Why not fixed now:** Out of scope for the current project phase. Would require persistent user identification (cookies, fingerprinting, or auth) and a user-level data model.
+**Current limitation:** Tracking only fires on video load and question — page visits alone (`GET /api/status`) do not create a user record.
 
-**Future fix (commercial):**
-- Add a persistent anonymous user ID via a long-lived cookie (e.g. `atv_uid` UUID, 1-year expiry)
-- Store in a Supabase `users` table with `first_seen`, `last_seen`, `total_sessions`, `total_questions`
-- Link events to user ID for user-level analytics (retention, engagement, conversion from free to paid)
-- If auth is added (e.g. email login for paid tier), merge anonymous sessions into the authenticated user profile
+**Remaining future work (commercial):**
+- Add authenticated user identification (e.g. email login for paid tier)
+- Merge anonymous sessions into authenticated user profiles
+- User-level analytics: retention cohorts, engagement funnels, conversion tracking
+- Session persistence: store session state in Supabase so users can resume after page reload

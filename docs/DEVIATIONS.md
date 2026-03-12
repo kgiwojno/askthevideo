@@ -545,6 +545,39 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 
 ---
 
+## 36. Anonymous user tracking
+
+**Spec said:** No user identification — sessions are ephemeral with no cross-session linking.
+**Actual:** Anonymous persistent user tracking via `localStorage` UUID, `X-User-ID` header, and Supabase `users` table.
+
+**How it works:**
+- Frontend generates UUID on first visit, stores in `localStorage` as `atv_uid`
+- Sent as `X-User-ID` header on `/api/videos`, `/api/ask`, `/api/ask/stream`
+- Backend upserts user record in Supabase on session start (fire-and-forget)
+- Increments `total_questions` and `total_videos` on each respective action
+- All events tagged with `user_id` in the `events` table
+- No cookies — no consent banner needed
+
+**Supabase schema changes:**
+- New `users` table: `uid`, `first_seen`, `last_seen`, `total_sessions`, `total_questions`, `total_videos`, `environment`
+- New `user_id` column on `events` table
+- RLS: INSERT + SELECT + UPDATE on `users` (UPDATE needed for upsert on return visits)
+
+**Admin API returns new `users` section:**
+
+| Field | Description |
+|-------|-------------|
+| `total_users` | Total unique users |
+| `returning_users` | Users with >1 session |
+| `avg_sessions_per_user` | Average sessions per user |
+| `avg_questions_per_user` | Average questions per user |
+
+**Tracking scope:** Video loads and questions only. Page visits (`GET /api/status`) do not trigger user tracking.
+
+**Files modified:** `src/metrics.py`, `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/routes/admin.py`
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -584,3 +617,4 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | 33 | `api/routes/ask.py`, `api/routes/videos.py`, `api/session.py`, `src/metrics.py` | Basic event detail strings | Enriched with latency, tokens, tool, duration, session depth + parsed fields in API | Observability for performance and usage analytics |
 | 34 | `api/routes/ask.py` | 6 Discord alert types | 7th alert: `slow_query` (>60s) | Detect queries where user likely gave up |
 | 35 | `src/metrics.py`, `api/routes/admin.py` | Fixed $5 budget with single alert | Cycle-based: auto-detect $5 reloads, alert at 80% of each cycle, cumulative tracking | Budget reloads don't require config changes |
+| 36 | `src/metrics.py`, `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/routes/admin.py` | No user identification | Anonymous tracking via localStorage UUID + Supabase `users` table | Cross-session user analytics without cookies |

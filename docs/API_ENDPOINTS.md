@@ -368,6 +368,12 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
     "total_vectors": 8456,
     "index_fullness_percent": 8.5
   },
+  "users": {
+    "total_users": 12,
+    "returning_users": 3,
+    "avg_sessions_per_user": 1.5,
+    "avg_questions_per_user": 2.8
+  },
   "events": [
     {"timestamp": "...", "type": "QUERY", "subtype": "free", "ip": "...", "detail": "..."}
   ],

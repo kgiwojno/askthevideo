@@ -249,10 +249,11 @@ Run against a live server (local or production). Tests the full flow including r
 | LangGraph agent | `create_agent` with 5 tools | Agent decides which tool to use; supports multi-turn conversation |
 | Residential proxy | Webshare via `GenericProxyConfig` | Only reliable way to bypass YouTube IP blocking from cloud |
 | Persistent logging | Supabase (dual-write + startup restore) | Container restarts on Koyeb lose in-memory metrics; Supabase preserves historical data across deploys |
+| Anonymous user tracking | `localStorage` UUID + `X-User-ID` header + Supabase `users` table | No cookies (no consent banner); tracks returning users, sessions/user, questions/user |
 
 ---
 
-## 11. All 35 Documented Deviations from Original Spec
+## 11. All 36 Documented Deviations from Original Spec
 
 Every place where the actual build differs from the original spec is documented in `docs/DEVIATIONS.md`. Categories:
 
@@ -269,6 +270,7 @@ Every place where the actual build differs from the original spec is documented 
 | Alerting & monitoring | 3 | Discord integration, unused APP_URL constant, slow query alert |
 | Code organization | 2 | Shared utility module, video selection filtering |
 | Configuration changes | 1 | Free tier limits reduced from 5/10 to 3/5 |
+| User analytics | 1 | Anonymous user tracking via localStorage UUID + Supabase |
 
 ---
 
@@ -301,7 +303,7 @@ Every place where the actual build differs from the original spec is documented 
 | End-to-end smoke tests | 15 |
 | API endpoints | 11 |
 | AI tools | 5 |
-| Deviations from spec | 35 (all documented) |
+| Deviations from spec | 36 (all documented) |
 | YouTube IP blocking workarounds tried | 3 (all failed) |
 | Final solution (Webshare proxy) | ~10 lines of code |
 | Cost per 5-question session (60-min video) | ~$0.15-0.20 |

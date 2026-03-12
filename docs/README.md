@@ -33,7 +33,7 @@ docs/
 |------|---------|----------|
 | **HANDOFF_ASKTHEVIDEO.md** | Master document covering architecture, development journey, challenges, what worked/didn't, testing, costs, and key numbers. Use this to build presentations and commercial materials. | Presentation prep, stakeholders |
 | **API_ENDPOINTS.md** | Complete API reference: every endpoint with request/response schemas, error codes, SSE streaming format, session management, and free tier limits. | Developers, API consumers |
-| **DEVIATIONS.md** | Every place where the actual build differs from the original spec. 35 entries with root cause, fix, and rationale. Summary table at the bottom. | Technical review, grading |
+| **DEVIATIONS.md** | Every place where the actual build differs from the original spec. 36 entries with root cause, fix, and rationale. Summary table at the bottom. | Technical review, grading |
 | **KNOWN_ISSUES.md** | Non-critical issues and edge cases identified during final review. Each entry has location, impact, why it was deferred, and a suggested future fix. 7 items documented. | Future development |
 | **BUG_CASCADE_FAILURE.md** | Detailed analysis of the tool failure cascade bug: root cause, options considered, fix applied, and remaining edge case. | Technical reference |
 | **SUPABASE_SETUP.md** | Complete Supabase setup guide: table schemas, RLS policies, environment separation, verification steps, and maintenance SQL. | Setup, ops |
