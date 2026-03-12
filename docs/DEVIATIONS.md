@@ -578,6 +578,27 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 
 ---
 
+## 37. Discord alerts upgraded to color-coded embeds
+
+**Spec said:** Plain text Discord webhook messages.
+**Actual:** Color-coded embed cards with title, description, footer (environment), and timestamp. Added `User-Agent` header to fix Discord blocking Python's default user agent.
+
+**Alert styles:**
+
+| Alert Type | Title | Color |
+|------------|-------|-------|
+| `budget_threshold` | 💰 Budget Threshold | Yellow |
+| `slow_query` | 🐢 Slow Query | Orange |
+| `anthropic_error` | 🚨 Anthropic API Error | Red |
+| `youtube_blocked` | 🚫 YouTube IP Blocked | Orange |
+| `proxy_down` | 🔌 Proxy Down | Red |
+| `pinecone_error` | 💾 Pinecone Error | Red |
+| `uncaught_500` | 💥 Uncaught Server Error | Red |
+
+**Files modified:** `src/errors.py`
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -618,3 +639,4 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | 34 | `api/routes/ask.py` | 6 Discord alert types | 7th alert: `slow_query` (>60s) | Detect queries where user likely gave up |
 | 35 | `src/metrics.py`, `api/routes/admin.py` | Fixed $5 budget with single alert | Cycle-based: auto-detect $5 reloads, alert at 80% of each cycle, cumulative tracking | Budget reloads don't require config changes |
 | 36 | `src/metrics.py`, `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/routes/admin.py` | No user identification | Anonymous tracking via localStorage UUID + Supabase `users` table | Cross-session user analytics without cookies |
+| 37 | `src/errors.py` | Plain text Discord messages | Color-coded embeds with title, environment footer, timestamp + User-Agent fix | Visual clarity, fixes Discord blocking Python user agent |

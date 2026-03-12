@@ -253,7 +253,7 @@ Run against a live server (local or production). Tests the full flow including r
 
 ---
 
-## 11. All 36 Documented Deviations from Original Spec
+## 11. All 37 Documented Deviations from Original Spec
 
 Every place where the actual build differs from the original spec is documented in `docs/DEVIATIONS.md`. Categories:
 
@@ -267,7 +267,7 @@ Every place where the actual build differs from the original spec is documented 
 | YouTube IP blocking | 4 | 3 failed attempts + residential proxy solution |
 | Error handling improvements | 3 | Proxy-aware messages, expanded exception types, tool cascade failure fix |
 | Production operations | 7 | Cost tracking, tool cache logging, log format fix, event log path, Supabase persistent logging, enhanced observability, budget cycle tracking |
-| Alerting & monitoring | 3 | Discord integration, unused APP_URL constant, slow query alert |
+| Alerting & monitoring | 4 | Discord integration, unused APP_URL constant, slow query alert, color-coded embeds |
 | Code organization | 2 | Shared utility module, video selection filtering |
 | Configuration changes | 1 | Free tier limits reduced from 5/10 to 3/5 |
 | User analytics | 1 | Anonymous user tracking via localStorage UUID + Supabase |
@@ -303,7 +303,7 @@ Every place where the actual build differs from the original spec is documented 
 | End-to-end smoke tests | 15 |
 | API endpoints | 11 |
 | AI tools | 5 |
-| Deviations from spec | 36 (all documented) |
+| Deviations from spec | 37 (all documented) |
 | YouTube IP blocking workarounds tried | 3 (all failed) |
 | Final solution (Webshare proxy) | ~10 lines of code |
 | Cost per 5-question session (60-min video) | ~$0.15-0.20 |
