@@ -1,0 +1,308 @@
+# AskTheVideo — Supabase Setup Guide
+
+This document covers how to set up Supabase for persistent logging of events and metrics. The app works without Supabase (falls back to local file logging), but Supabase ensures data survives container restarts.
+
+---
+
+## 1. Create a Supabase Project
+
+1. Go to [supabase.com](https://supabase.com) and create a new project
+2. Note your **Project URL** and **Publishable Key** (under Settings → API)
+3. Add them to your `.env`:
+
+```bash
+export SUPABASE_URL="https://your-project-id.supabase.co"
+export SUPABASE_KEY="sb_publishable_xxxxx"
+export APP_ENV="production"   # or "local" for local Docker
+export INITIAL_COST_OFFSET="7.65"  # pre-Supabase spend (from Anthropic dashboard)
+```
+
+> **Security note:** We use the publishable key (not the service key). Row Level Security policies restrict what this key can do — INSERT and SELECT only. Even if the key leaks, no data can be updated or deleted via the API.
+
+---
+
+## 2. Create Tables
+
+Run the following SQL in the Supabase **SQL Editor** (Dashboard → SQL Editor → New query):
+
+### Events Table
+
+Stores all application events (queries, video loads, errors, alerts, etc.).
+
+```sql
+CREATE TABLE events (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    created_at  timestamptz DEFAULT now(),
+    event_type  text NOT NULL,
+    subtype     text,
+    ip          text,
+    detail      text,
+    environment text DEFAULT 'local'
+);
+
+-- Index for filtering by environment + time (admin panel reads)
+CREATE INDEX idx_events_env_created ON events (environment, created_at DESC);
+
+-- Index for counting by event type (startup restore)
+CREATE INDEX idx_events_env_type ON events (environment, event_type);
+```
+
+**Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | bigint | Auto-incrementing primary key |
+| `created_at` | timestamptz | Auto-set by Supabase on insert |
+| `event_type` | text | `QUERY`, `VIDEO`, `SESSION`, `ERROR`, `KEY`, `ALERT`, `TOOL` |
+| `subtype` | text | Context-dependent (e.g., `free`/`key` for queries, `cache`/`api` for tools) |
+| `ip` | text | Client IP address |
+| `detail` | text | Human-readable event detail |
+| `environment` | text | `production` or `local` — separates environments in shared database |
+
+### Metrics Snapshots Table
+
+Stores periodic snapshots of cumulative metrics (written after each Claude API call).
+
+```sql
+CREATE TABLE metrics_snapshots (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    created_at          timestamptz DEFAULT now(),
+    total_input_tokens  bigint DEFAULT 0,
+    total_output_tokens bigint DEFAULT 0,
+    estimated_cost      numeric(10,4) DEFAULT 0,
+    total_queries       integer DEFAULT 0,
+    total_videos_loaded integer DEFAULT 0,
+    active_sessions     integer DEFAULT 0,
+    ram_mb              numeric(6,1) DEFAULT 0,
+    environment         text DEFAULT 'local'
+);
+
+-- Index for fetching latest snapshot per environment (startup restore)
+CREATE INDEX idx_snapshots_env_created ON metrics_snapshots (environment, created_at DESC);
+```
+
+**Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | bigint | Auto-incrementing primary key |
+| `created_at` | timestamptz | Auto-set by Supabase on insert |
+| `total_input_tokens` | bigint | Cumulative input tokens across all API calls |
+| `total_output_tokens` | bigint | Cumulative output tokens across all API calls |
+| `estimated_cost` | numeric | Estimated cost in USD |
+| `total_queries` | integer | Total questions asked |
+| `total_videos_loaded` | integer | Total videos loaded |
+| `active_sessions` | integer | Active sessions at time of snapshot |
+| `ram_mb` | numeric | Container RAM usage in MB |
+| `environment` | text | `production` or `local` |
+
+---
+
+## 3. Enable Row Level Security (RLS)
+
+RLS must be enabled on both tables. This ensures the publishable key can only INSERT and SELECT — no UPDATE or DELETE, even if the key is compromised.
+
+```sql
+-- Enable RLS
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE metrics_snapshots ENABLE ROW LEVEL SECURITY;
+
+-- Events: allow insert
+CREATE POLICY "Allow insert for anon"
+    ON events
+    FOR INSERT
+    TO anon
+    WITH CHECK (true);
+
+-- Events: allow select
+CREATE POLICY "Allow select for anon"
+    ON events
+    FOR SELECT
+    TO anon
+    USING (true);
+
+-- Metrics snapshots: allow insert
+CREATE POLICY "Allow insert for anon"
+    ON metrics_snapshots
+    FOR INSERT
+    TO anon
+    WITH CHECK (true);
+
+-- Metrics snapshots: allow select
+CREATE POLICY "Allow select for anon"
+    ON metrics_snapshots
+    FOR SELECT
+    TO anon
+    USING (true);
+```
+
+> **No UPDATE or DELETE policies** are created intentionally. The publishable key cannot modify or remove existing rows. To clean up data, use the Supabase SQL Editor directly (which uses the service role).
+
+---
+
+## 4. Verify Setup
+
+After setting up tables and policies, verify the connection works:
+
+```bash
+# Test insert (replace with your actual URL and key)
+curl -X POST "https://your-project-id.supabase.co/rest/v1/events" \
+  -H "apikey: sb_publishable_xxxxx" \
+  -H "Authorization: Bearer sb_publishable_xxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"event_type": "TEST", "subtype": "setup", "ip": "127.0.0.1", "detail": "Setup verification", "environment": "local"}'
+
+# Test select
+curl "https://your-project-id.supabase.co/rest/v1/events?order=created_at.desc&limit=1" \
+  -H "apikey: sb_publishable_xxxxx" \
+  -H "Authorization: Bearer sb_publishable_xxxxx" \
+  -H "Accept: application/json"
+```
+
+If both return successfully (201 for insert, 200 with JSON array for select), the setup is complete.
+
+**Clean up the test row:**
+
+```sql
+DELETE FROM events WHERE event_type = 'TEST' AND detail = 'Setup verification';
+```
+
+---
+
+## 5. Environment Separation
+
+The `environment` column separates data from different deployments sharing the same Supabase project:
+
+| `APP_ENV` value | When used | Effect |
+|-----------------|-----------|--------|
+| `production` | Koyeb deployment | All writes tagged `production`; admin panel only shows production data |
+| `local` (default) | Local Docker, dev | All writes tagged `local`; doesn't pollute production metrics |
+
+The app filters all reads by `environment`, so:
+- Production admin panel only shows production events and restores production metrics on startup
+- Local Docker only shows local events
+- Both write to the same tables but never interfere with each other
+
+**Important:** Set `APP_ENV=production` on Koyeb. Without it, production logs are tagged `"local"` and won't restore correctly after container restart.
+
+---
+
+## 6. How Data Flows
+
+```
+App starts
+  └── _restore_from_supabase()
+        ├── GET /events?environment=eq.production  →  count by event_type  →  seed _app_metrics
+        └── GET /metrics_snapshots?environment=eq.production&limit=1  →  seed token totals
+
+User asks a question
+  ├── log_event("QUERY", ...)  →  local file + POST /events (daemon thread)
+  └── record_tokens(in, out)   →  POST /metrics_snapshots (daemon thread)
+
+Admin opens dashboard
+  └── get_recent_events(50)  →  GET /events?environment=eq.production&limit=50 (last 7 days)
+                                  fallback: read local events.log if Supabase unavailable
+```
+
+All Supabase writes are fire-and-forget (daemon threads) — they never block the request. If Supabase is down, the app continues normally with local file logging.
+
+---
+
+## 7. Maintenance
+
+### View data
+
+```sql
+-- Recent production events
+SELECT * FROM events
+WHERE environment = 'production'
+ORDER BY created_at DESC
+LIMIT 50;
+
+-- Latest metrics snapshot
+SELECT * FROM metrics_snapshots
+WHERE environment = 'production'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- Event counts by type (production only)
+SELECT event_type, COUNT(*) as count
+FROM events
+WHERE environment = 'production'
+GROUP BY event_type
+ORDER BY count DESC;
+```
+
+### Analytics queries
+
+The `detail` column contains structured key=value data that can be extracted with SQL regex:
+
+```sql
+-- Average query latency (ms)
+SELECT AVG(CAST(substring(detail FROM 'latency=(\d+)ms') AS int)) AS avg_latency_ms
+FROM events WHERE event_type IN ('QUERY', 'KEY') AND environment = 'production';
+
+-- Tool usage distribution
+SELECT substring(detail FROM 'tool=(\w+)') AS tool, COUNT(*) AS count
+FROM events WHERE event_type IN ('QUERY', 'KEY') AND environment = 'production'
+GROUP BY tool ORDER BY count DESC;
+
+-- Average tokens per query
+SELECT
+  AVG(CAST(substring(detail FROM 'tokens=(\d+)/') AS int)) AS avg_input_tokens,
+  AVG(CAST(substring(detail FROM 'tokens=\d+/(\d+)') AS int)) AS avg_output_tokens
+FROM events WHERE event_type IN ('QUERY', 'KEY') AND environment = 'production';
+
+-- Slowest tool executions
+SELECT detail, created_at FROM events
+WHERE event_type = 'TOOL' AND environment = 'production'
+ORDER BY CAST(substring(detail FROM 'latency=(\d+)ms') AS int) DESC
+LIMIT 10;
+
+-- Cache hit rate (summarize + topics only)
+SELECT subtype, COUNT(*) FROM events
+WHERE event_type = 'TOOL' AND environment = 'production'
+GROUP BY subtype;
+
+-- Session engagement: how many users hit question limit?
+SELECT
+  COUNT(*) FILTER (WHERE CAST(substring(detail FROM 'questions=(\d+)') AS int) >= 5) AS hit_limit,
+  COUNT(*) AS total_sessions,
+  AVG(CAST(substring(detail FROM 'questions=(\d+)') AS int)) AS avg_questions
+FROM events WHERE event_type = 'SESSION' AND subtype = 'end' AND environment = 'production';
+
+-- Video load times (new ingestions only)
+SELECT
+  AVG(CAST(substring(detail FROM 'fetch=(\d+)ms') AS int)) AS avg_fetch_ms,
+  AVG(CAST(substring(detail FROM 'duration=(\d+)s') AS int)) AS avg_duration_s
+FROM events WHERE event_type = 'VIDEO' AND subtype = 'new' AND environment = 'production';
+```
+
+### Clean up old data
+
+```sql
+-- Delete local/test data
+DELETE FROM events WHERE environment = 'local';
+DELETE FROM metrics_snapshots WHERE environment = 'local';
+
+-- Delete events older than 30 days
+DELETE FROM events WHERE created_at < now() - interval '30 days';
+
+-- Delete old snapshots (keep last 100 per environment)
+DELETE FROM metrics_snapshots
+WHERE id NOT IN (
+    SELECT id FROM metrics_snapshots
+    WHERE environment = 'production'
+    ORDER BY created_at DESC
+    LIMIT 100
+);
+```
+
+### Storage estimates
+
+| Table | Row size | Rows/day (typical) | Monthly storage |
+|-------|----------|-------------------|-----------------|
+| `events` | ~200 bytes | ~50-200 | ~1 MB |
+| `metrics_snapshots` | ~150 bytes | ~20-50 | ~0.2 MB |
+
+Well within Supabase's free tier (500 MB database).
