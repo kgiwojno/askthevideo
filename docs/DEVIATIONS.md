@@ -536,7 +536,10 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | `budget_cycle_remaining` | Remaining in current cycle |
 | `budget_total_loaded` | Total ever loaded (cycle ceiling) |
 
-**New env var:** `INITIAL_COST_OFFSET` (default `0`)
+**New env vars:**
+- `INITIAL_COST_OFFSET` (default `0`) — pre-Supabase cumulative spend in USD
+- `INITIAL_INPUT_TOKENS` (default `0`) — pre-Supabase cumulative input tokens
+- `INITIAL_OUTPUT_TOKENS` (default `0`) — pre-Supabase cumulative output tokens
 
 **Files modified:** `src/metrics.py`, `api/routes/admin.py`, `tests/test_metrics.py`
 

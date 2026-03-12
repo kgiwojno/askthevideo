@@ -15,6 +15,8 @@ export SUPABASE_URL="https://your-project-id.supabase.co"
 export SUPABASE_KEY="sb_publishable_xxxxx"
 export APP_ENV="production"   # or "local" for local Docker
 export INITIAL_COST_OFFSET="7.65"  # pre-Supabase spend (from Anthropic dashboard)
+export INITIAL_INPUT_TOKENS="1785872"  # pre-Supabase cumulative input tokens
+export INITIAL_OUTPUT_TOKENS="152302"  # pre-Supabase cumulative output tokens
 ```
 
 > **Security note:** We use the publishable key (not the service key). Row Level Security policies restrict what this key can do — INSERT and SELECT only. Even if the key leaks, no data can be updated or deleted via the API.

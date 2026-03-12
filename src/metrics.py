@@ -228,6 +228,14 @@ def _get_initial_cost_offset() -> float:
     return float(os.getenv("INITIAL_COST_OFFSET", "0"))
 
 
+def _get_initial_token_offsets() -> tuple[int, int]:
+    """Pre-Supabase token usage. Set once via env vars."""
+    return (
+        int(os.getenv("INITIAL_INPUT_TOKENS", "0")),
+        int(os.getenv("INITIAL_OUTPUT_TOKENS", "0")),
+    )
+
+
 def record_metric(key: str, increment: int = 1):
     """Thread-safe metric increment."""
     with _app_metrics["lock"]:
@@ -341,6 +349,11 @@ def get_metrics() -> dict:
     m["uptime_hours"] = round((time.time() - m["start_time"]) / 3600, 1)
     m["ram_mb"] = round(psutil.Process().memory_info().rss / 1024 ** 2, 1)
     m["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+
+    # Cumulative tokens (tracked + pre-Supabase offset)
+    offset_in, offset_out = _get_initial_token_offsets()
+    m["cumulative_input_tokens"] = m["total_input_tokens"] + offset_in
+    m["cumulative_output_tokens"] = m["total_output_tokens"] + offset_out
 
     tracked_cost = (
         (m["total_input_tokens"] / 1000 * COST_INPUT_PER_1K)

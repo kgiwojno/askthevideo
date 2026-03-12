@@ -328,6 +328,8 @@ Every place where the actual build differs from the original spec is documented 
 | `SUPABASE_KEY` | Supabase publishable key (RLS-protected) | Optional |
 | `APP_ENV` | Environment tag for logs (`production`, `local`) | Production |
 | `INITIAL_COST_OFFSET` | Pre-Supabase cumulative spend in USD | Production |
+| `INITIAL_INPUT_TOKENS` | Pre-Supabase cumulative input tokens | Production |
+| `INITIAL_OUTPUT_TOKENS` | Pre-Supabase cumulative output tokens | Production |
 | `DISCORD_WEBHOOK_URL` | Error alerting | Optional |
 | `LANGSMITH_API_KEY` | LLM tracing | Optional |
 | `LANGSMITH_TRACING` | Enable/disable tracing | Optional |

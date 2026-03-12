@@ -415,6 +415,8 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
 | `SUPABASE_KEY` | No | Supabase publishable key (RLS-protected) |
 | `APP_ENV` | No | Environment tag for Supabase logs (default: `local`, set to `production` on Koyeb) |
 | `INITIAL_COST_OFFSET` | No | Pre-Supabase cumulative API spend in USD (default: `0`) |
+| `INITIAL_INPUT_TOKENS` | No | Pre-Supabase cumulative input tokens (default: `0`) |
+| `INITIAL_OUTPUT_TOKENS` | No | Pre-Supabase cumulative output tokens (default: `0`) |
 | `DISCORD_WEBHOOK_URL` | No | Error alerting webhook |
 | `LANGSMITH_API_KEY` | No | LLM tracing |
 | `LANGSMITH_TRACING` | No | Enable/disable tracing |
