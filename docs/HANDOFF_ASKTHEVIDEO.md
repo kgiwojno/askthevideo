@@ -406,5 +406,7 @@ askthevideo/
 ├── koyeb.yaml
 ├── requirements.txt
 ├── requirements-dev.txt        # Dev-only dependencies
+├── .env.example                # Template for local .env
+├── .env.docker.example         # Template for docker .env
 └── LICENSE
 ```

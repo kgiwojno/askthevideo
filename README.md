@@ -77,6 +77,8 @@ askthevideo/
 ├── koyeb.yaml
 ├── requirements.txt
 ├── requirements-dev.txt
+├── .env.example              # Template for local .env
+├── .env.docker.example       # Template for docker .env
 └── LICENSE
 ```
 
