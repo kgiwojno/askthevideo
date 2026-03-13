@@ -350,8 +350,8 @@ askthevideo/
 │   ├── vectorstore.py          # Pinecone embed/upsert/query
 │   ├── tools.py                # 5 Claude tools
 │   ├── agent.py                # LangGraph agent factory
-│   ├── errors.py               # Discord alerting with throttling
 │   ├── metrics.py              # Token tracking, cost, event logging, Supabase persistence
+│   ├── errors.py               # Discord alerting with throttling
 │   ├── metadata.py             # YouTube oEmbed metadata
 │   ├── validation.py           # Input validation
 │   └── auth.py                 # Access key validation
@@ -364,10 +364,11 @@ askthevideo/
 │       ├── videos.py           # POST/GET/DELETE/PATCH /api/videos
 │       ├── ask.py              # POST /api/ask + /api/ask/stream (SSE)
 │       ├── auth.py             # POST /api/auth
-│       ├── status.py           # GET /api/status, /api/history
-│       └── admin.py            # Admin panel endpoints
-├── config/settings.py          # App constants
-├── notebooks/                  # Phase 1 (source of truth for src/)
+│       ├── admin.py            # POST /api/admin/auth + GET /api/admin/metrics
+│       └── status.py           # GET /api/status, /api/history
+├── config/
+│   └── settings.py             # App constants (models, limits, TTLs)
+├── notebooks/                  # Phase 1 exploration (source of truth for src/)
 │   ├── 01_transcript_fetch.ipynb
 │   ├── 02_chunking.ipynb
 │   ├── 03_pinecone_operations.ipynb
@@ -386,12 +387,13 @@ askthevideo/
 │   └── gcf-transcript-proxy/   # [Reference] Failed GCF approach
 ├── frontend/                   # React build (from Lovable)
 ├── docs/
-│   ├── DEVIATIONS.md           # 35 documented deviations
 │   ├── HANDOFF_ASKTHEVIDEO.md  # This file
-│   ├── API_ENDPOINTS.md        # Full API reference (11 endpoints)
+│   ├── API_ENDPOINTS.md        # Full API reference (12 endpoints)
+│   ├── DEVIATIONS.md           # 37 documented deviations
 │   ├── KNOWN_ISSUES.md         # Non-critical issues for future fix
+│   ├── BUG_CASCADE_FAILURE.md  # Tool failure cascade analysis
 │   ├── SUPABASE_SETUP.md       # Supabase setup: tables, RLS, maintenance
-│   └── spec/                   # Original planning documents
+│   └── spec/                   # Original planning documents (pre-build)
 │       ├── PROJECT_PLAN.md
 │       ├── SYSTEM_DESIGN.md
 │       ├── FASTAPI_BACKEND_SPEC.md
@@ -403,5 +405,6 @@ askthevideo/
 ├── Makefile
 ├── koyeb.yaml
 ├── requirements.txt
-└── requirements-dev.txt        # Dev-only dependencies
+├── requirements-dev.txt        # Dev-only dependencies
+└── LICENSE
 ```

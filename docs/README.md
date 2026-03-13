@@ -10,8 +10,8 @@ All project documentation lives in `docs/`. The folder is split into two layers:
 docs/
 ├── README.md                  # This file — explains the docs structure
 ├── HANDOFF_ASKTHEVIDEO.md     # Master handoff document for presentations
-├── API_ENDPOINTS.md           # Full API reference (11 endpoints)
-├── DEVIATIONS.md              # 35 spec deviations, all documented
+├── API_ENDPOINTS.md           # Full API reference (12 endpoints)
+├── DEVIATIONS.md              # 37 spec deviations, all documented
 ├── KNOWN_ISSUES.md            # Non-critical issues for future fix (7 items)
 ├── BUG_CASCADE_FAILURE.md     # Tool failure cascade bug analysis and fix
 ├── SUPABASE_SETUP.md          # Supabase setup: tables, RLS policies, maintenance

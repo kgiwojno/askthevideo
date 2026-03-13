@@ -1,82 +1,118 @@
 # AskTheVideo
 
+**Author:** Krzysztof Giwojno
+
 Ask questions about YouTube videos using AI. Load any video, then chat with it — get answers with timestamps.
 
 **Stack:** FastAPI backend + React frontend (served from same container) + Pinecone vector store + Claude (Anthropic).
 
 ---
 
-## Project structure
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| **[askthevideo](https://github.com/kgiwojno/askthevideo)** | Backend + API (this repo) |
+| **[askthevideo-frontend](https://github.com/kgiwojno/askthevideo-frontend)** | React frontend |
+| **[askthevideo-landing-page](https://github.com/kgiwojno/askthevideo-landing-page)** | Landing page |
+
+---
+
+## Project Structure
 
 ```
 askthevideo/
-├── src/                    # Core library modules (extracted from notebooks)
-│   ├── transcript.py       # YouTube transcript fetching
-│   ├── chunking.py         # Time-window chunking
-│   ├── vectorstore.py      # Pinecone operations
-│   ├── tools.py            # Claude tool implementations
-│   ├── agent.py            # LangGraph agent factory
-│   ├── metadata.py         # YouTube oEmbed metadata
-│   ├── validation.py       # Input validation
-│   ├── errors.py           # Error handling + Discord alerts
-│   └── auth.py             # Access key validation
-├── api/                    # FastAPI routing layer
-│   ├── main.py             # App entry point + static file serving
-│   ├── session.py          # In-memory session management
-│   ├── dependencies.py     # Pinecone + Anthropic singletons
+├── src/                        # Core library (generated from notebooks)
+│   ├── transcript.py           # YouTube transcript fetch + Webshare proxy
+│   ├── chunking.py             # 2-min window chunking with carry-over
+│   ├── vectorstore.py          # Pinecone embed/upsert/query
+│   ├── tools.py                # 5 Claude tools
+│   ├── agent.py                # LangGraph agent factory
+│   ├── metrics.py              # Token tracking, cost, event logging, Supabase persistence
+│   ├── errors.py               # Discord alerting with throttling
+│   ├── metadata.py             # YouTube oEmbed metadata
+│   ├── validation.py           # Input validation
+│   └── auth.py                 # Access key validation
+├── api/                        # FastAPI routing layer
+│   ├── main.py                 # App entry + static serving + error handlers
+│   ├── session.py              # In-memory session management
+│   ├── dependencies.py         # Pinecone + Anthropic singletons
+│   ├── utils.py                # Shared helpers (get_client_ip)
 │   └── routes/
-│       ├── videos.py       # POST/GET/DELETE/PATCH /api/videos
-│       ├── ask.py          # POST /api/ask + /api/ask/stream (SSE)
-│       ├── auth.py         # POST /api/auth
-│       └── status.py       # GET /api/status, /api/history
+│       ├── videos.py           # POST/GET/DELETE/PATCH /api/videos
+│       ├── ask.py              # POST /api/ask + /api/ask/stream (SSE)
+│       ├── auth.py             # POST /api/auth
+│       ├── admin.py            # POST /api/admin/auth + GET /api/admin/metrics
+│       └── status.py           # GET /api/status, /api/history
 ├── config/
-│   └── settings.py         # App constants (models, limits, TTLs)
-├── notebooks/              # Phase 1 exploration (reference only)
-├── tests/                  # Unit + integration tests
+│   └── settings.py             # App constants (models, limits, TTLs)
+├── notebooks/                  # Phase 1 exploration (source of truth for src/)
+│   ├── 01_transcript_fetch.ipynb
+│   ├── 02_chunking.ipynb
+│   ├── 03_pinecone_operations.ipynb
+│   ├── 04_claude_tools.ipynb
+│   ├── 05_agent_routing.ipynb
+│   ├── 06_integration_flow.ipynb
+│   └── 07_evaluation.ipynb
+├── tests/                      # 51 unit tests
+├── data/
+│   └── test_transcripts.json   # Test fixture data
 ├── scripts/
-│   └── extract.py          # Extracts production code from notebooks
-├── frontend/               # React build output (served at /)
+│   ├── extract.py              # Notebook → src/ extractor
+│   ├── smoke_test.py           # 15 e2e tests
+│   ├── docker_build.sh         # Docker build helper
+│   ├── cloudflare-worker.js    # [Reference] Failed CF Worker approach
+│   └── gcf-transcript-proxy/   # [Reference] Failed GCF approach
+├── frontend/                   # React build (from Lovable)
+├── docs/                       # Project documentation
+│   ├── HANDOFF_ASKTHEVIDEO.md  # Master handoff document
+│   ├── API_ENDPOINTS.md        # Full API reference
+│   ├── DEVIATIONS.md           # 37 spec deviations documented
+│   ├── KNOWN_ISSUES.md         # Non-critical issues for future fix
+│   ├── BUG_CASCADE_FAILURE.md  # Tool failure cascade analysis
+│   ├── SUPABASE_SETUP.md       # Supabase setup guide
+│   └── spec/                   # Original planning documents (pre-build)
 ├── Dockerfile
 ├── Makefile
-└── requirements.txt
+├── koyeb.yaml
+├── requirements.txt
+├── requirements-dev.txt
+└── LICENSE
 ```
 
 ---
 
-## Local development
+## Local Development
 
 ### Prerequisites
 
 - Python 3.12
-- `.env` file with all required keys (see Environment variables below)
+- `.env` file with required keys (see Environment Variables below)
 
-### Setup
+### Setup and Run
 
 ```bash
-# Activate the existing venv
 source .venv/bin/activate
-
-# Install dependencies (if not already installed)
 pip install -r requirements.txt
-```
-
-### Run the server
-
-```bash
-source .venv/bin/activate
 uvicorn api.main:app --reload --port 8000
 ```
 
 API docs available at `http://localhost:8000/docs`.
 
-### Run tests
+### Tests
 
 ```bash
-source .venv/bin/activate
+# Unit tests (fast, offline — no API keys needed)
 pytest tests/ -v
+
+# Smoke tests (requires a running server)
+python scripts/smoke_test.py http://localhost:8000
+
+# Against production
+python scripts/smoke_test.py https://app.askthevideo.com
 ```
 
-### Makefile targets
+### Makefile Targets
 
 ```bash
 make extract   # Re-extract src/ code from notebooks
@@ -86,69 +122,30 @@ make test      # Run pytest
 make all       # extract → format → lint → test
 ```
 
-### Unit tests (pytest)
-
-Fast, offline tests — no API keys or running server needed:
-
-```bash
-source .venv/bin/activate
-pytest tests/ -v
-```
-
-### Smoke tests (end-to-end against a running server)
-
-Requires a running server (local or production). Tests all 15 API scenarios including SSE streaming:
-
-```bash
-source .venv/bin/activate
-
-# Against local server or local Docker container
-python scripts/smoke_test.py http://localhost:8000
-
-# Against production
-python scripts/smoke_test.py https://app.askthevideo.com
-
-# Or via environment variable
-BASE_URL=http://localhost:8000 python scripts/smoke_test.py
-```
-
 ---
 
 ## Docker
 
-### 1. Prepare the env file
-
-`docker run` needs a plain `KEY=value` env file (no `export` prefix). Generate it from your existing `.env`:
+### Build and Run
 
 ```bash
+# Generate plain env file (no `export` prefix)
 sed 's/^export //' .env > .env.docker
-```
 
-This file is gitignored — never commit it.
-
-### 2. Build the image
-
-Use the build script:
-
-```bash
+# Build
 ./scripts/docker_build.sh
+
+# Run
+docker run --env-file .env.docker -p 8000:8000 askthevideo:latest
+
+# Verify
+curl http://localhost:8000/health
+# {"status": "ok"}
 ```
 
-Or directly with Docker:
+### Frontend
 
-```bash
-docker build -t askthevideo .
-```
-
-To build with a custom tag:
-
-```bash
-IMAGE_NAME=myrepo/askthevideo TAG=v1.0 ./scripts/docker_build.sh
-```
-
-### 3. Add the React frontend (optional, before building)
-
-The `frontend/` directory is copied into the image. Drop in a production React build before running the build script:
+The `frontend/` directory is copied into the image. Drop in a production React build before building:
 
 ```bash
 cp -r /path/to/react-build/* frontend/
@@ -157,60 +154,11 @@ cp -r /path/to/react-build/* frontend/
 
 Without a React build, a placeholder page is served at `/`. The API always works at `/api/`.
 
-### 4. Run the container locally
-
-```bash
-docker run --env-file .env.docker -p 8000:8000 askthevideo:latest
-```
-
-The app is now available at `http://localhost:8000`.
-
-Verify it's running:
-
-```bash
-curl http://localhost:8000/health
-# {"status": "ok"}
-```
-
-Run the smoke tests against it:
-
-```bash
-source .venv/bin/activate
-python scripts/smoke_test.py http://localhost:8000
-```
-
-### 5. Stop the container
-
-Find and stop the running container:
-
-```bash
-docker ps                        # find the container ID
-docker stop <container-id>
-```
-
-Or run it in the foreground (Ctrl+C to stop):
-
-```bash
-docker run --env-file .env.docker -p 8000:8000 askthevideo:latest
-```
-
-### Tag and push to a registry (for deployment)
-
-```bash
-# Example: push to Docker Hub
-docker tag askthevideo yourdockerhubuser/askthevideo:latest
-docker push yourdockerhubuser/askthevideo:latest
-
-# Example: push to GitHub Container Registry
-docker tag askthevideo ghcr.io/yourorg/askthevideo:latest
-docker push ghcr.io/yourorg/askthevideo:latest
-```
-
 ---
 
-## Deployment (Koyeb via GitHub)
+## Deployment (Koyeb)
 
-**Important:** Koyeb defaults to buildpack auto-detection and ignores the `Dockerfile` unless told otherwise. The `koyeb.yaml` file in the repo root forces it to use Docker:
+The `koyeb.yaml` in the repo root forces Koyeb to use Docker (instead of buildpack auto-detection):
 
 ```yaml
 build:
@@ -219,28 +167,17 @@ build:
     dockerfile: Dockerfile
 ```
 
-This file is already committed. Without it, Koyeb builds its own image via buildpack instead.
-
 ### Steps
 
-1. **Connect the GitHub repo** in the Koyeb dashboard (New service → GitHub).
-
-2. **Configure the service:**
-   - Builder: Docker (enforced by `koyeb.yaml`)
-   - Port: `8000`
-   - Health check: HTTP GET `/health`
-
-3. **Set environment variables** in the Koyeb dashboard — copy all keys from your `.env` file.
-
-4. **Assign the domain** `app.askthevideo.com` in Koyeb's domain settings.
-
-5. **Deploy** — every push to `main` triggers a rebuild automatically.
-
-The container serves the React app at `/` and the API at `/api/`.
+1. **Connect the GitHub repo** in the Koyeb dashboard
+2. **Configure:** Port `8000`, health check HTTP GET `/health`
+3. **Set environment variables** from your `.env` file
+4. **Assign domain** `app.askthevideo.com`
+5. **Deploy** — every push to `main` triggers a rebuild
 
 ---
 
-## API endpoints
+## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -254,35 +191,66 @@ The container serves the React app at `/` and the API at `/api/`.
 | `POST` | `/api/ask` | Ask a question (full response) |
 | `POST` | `/api/ask/stream` | Ask a question (SSE streaming) |
 | `POST` | `/api/auth` | Validate access key |
+| `POST` | `/api/admin/auth` | Admin panel authentication |
+| `GET` | `/api/admin/metrics` | Admin metrics + events |
 
 Session ID is passed via `X-Session-ID` header. First request omits it; the response includes a `session_id` to use on subsequent requests.
 
----
-
-## Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `PINECONE_API_KEY` | Pinecone API key |
-| `PINECONE_INDEX_NAME` | Pinecone index name (default: `askthevideo`) |
-| `LANGSMITH_API_KEY` | LangSmith tracing key |
-| `LANGSMITH_TRACING` | Enable tracing (`true`/`false`) |
-| `LANGSMITH_ENDPOINT` | LangSmith endpoint URL |
-| `LANGSMITH_PROJECT` | LangSmith project name |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for error alerts (optional) |
-| `ADMIN_TOKEN` | Admin token |
-| `VALID_ACCESS_KEYS` | Comma-separated list of valid access keys |
-| `WEBSHARE_USERNAME` | Webshare proxy username with `-rotate` suffix (optional, for cloud deployments) |
-| `WEBSHARE_PASSWORD` | Webshare proxy password (optional, for cloud deployments) |
+Full API reference: [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md)
 
 ---
 
-## Free tier limits (per session)
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `PINECONE_API_KEY` | Yes | Pinecone API key |
+| `PINECONE_INDEX_NAME` | No | Index name (default: `askthevideo`) |
+| `VALID_ACCESS_KEYS` | Yes | Comma-separated access keys |
+| `ADMIN_TOKEN` | Yes | Admin panel access token |
+| `WEBSHARE_USERNAME` | Production | Residential proxy username |
+| `WEBSHARE_PASSWORD` | Production | Residential proxy password |
+| `SUPABASE_URL` | No | Supabase REST API base URL |
+| `SUPABASE_KEY` | No | Supabase publishable key (RLS-protected) |
+| `APP_ENV` | Production | Environment tag (`production` or `local`) |
+| `INITIAL_COST_OFFSET` | No | Pre-Supabase cumulative spend in USD |
+| `INITIAL_INPUT_TOKENS` | No | Pre-Supabase cumulative input tokens |
+| `INITIAL_OUTPUT_TOKENS` | No | Pre-Supabase cumulative output tokens |
+| `DISCORD_WEBHOOK_URL` | No | Discord webhook for error alerts |
+| `LANGSMITH_API_KEY` | No | LangSmith tracing key |
+| `LANGSMITH_TRACING` | No | Enable tracing (`true`/`false`) |
+| `LANGSMITH_ENDPOINT` | No | LangSmith endpoint URL |
+| `LANGSMITH_PROJECT` | No | LangSmith project name |
+
+---
+
+## Free Tier Limits (per session)
 
 | Limit | Value |
 |-------|-------|
-| Videos | 5 |
-| Questions | 10 |
+| Videos | 3 |
+| Questions | 5 |
 | Max video duration | 60 minutes |
 | Session TTL | 2 hours |
+
+Access key authentication unlocks unlimited usage.
+
+---
+
+## AI Assistance
+
+This project was built with assistance from AI development tools:
+
+- **Claude** (Anthropic) — code generation, debugging,
+  and documentation cleanup via Claude Code and claude.ai
+- **Lovable** — application scaffolding and UI development
+
+All architectural decisions, feature design, and final implementation
+reflect the author's judgment. All code has been reviewed and tested.
+
+---
+
+## License
+
+MIT License © 2026 Krzysztof Giwojno — see [LICENSE](LICENSE) for details.
