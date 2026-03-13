@@ -2,15 +2,23 @@
 
 import os
 import time
+import threading
+from collections import defaultdict
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api.dependencies import get_pinecone
 from api.utils import get_client_ip
+from src.errors import send_discord_alert
 from src.metrics import get_metrics, get_recent_events, get_user_stats, log_event, BUDGET_CYCLE
 
 router = APIRouter()
+
+# Track failed admin login attempts per IP within a 30-minute window
+_admin_fail_lock = threading.Lock()
+_admin_fails: dict[str, list[float]] = defaultdict(list)
+_ADMIN_FAIL_WINDOW = 1800  # 30 minutes
 
 
 class AdminAuthRequest(BaseModel):
@@ -38,21 +46,53 @@ def get_pinecone_stats() -> dict:
         }
 
 
+def _record_admin_fail(ip: str):
+    """Track failed admin login and alert at 3/6/9/... attempts within the window."""
+    now = time.time()
+    with _admin_fail_lock:
+        # Prune old attempts outside window
+        _admin_fails[ip] = [t for t in _admin_fails[ip] if now - t < _ADMIN_FAIL_WINDOW]
+        _admin_fails[ip].append(now)
+        count = len(_admin_fails[ip])
+
+    if count >= 3 and count % 3 == 0:
+        if count <= 3:
+            severity = "warning"
+            label = "Minor"
+        elif count <= 6:
+            severity = "elevated"
+            label = "Elevated"
+        else:
+            severity = "critical"
+            label = "Critical"
+        send_discord_alert(
+            f"{label}: {count} failed admin login attempts from IP {ip} "
+            f"in the last {_ADMIN_FAIL_WINDOW // 60} minutes.",
+            alert_type=f"admin_brute_{severity}",
+        )
+
+
 @router.post("/admin/auth")
 def admin_auth(body: AdminAuthRequest, request: Request):
     valid = body.token == os.getenv("ADMIN_TOKEN", "")
     ip = get_client_ip(request)
     if valid:
         log_event("ADMIN", "success", ip, "admin_login")
+        # Clear failed attempts on successful login
+        with _admin_fail_lock:
+            _admin_fails.pop(ip, None)
     else:
         log_event("ADMIN", "fail", ip, "invalid_token")
+        _record_admin_fail(ip)
     return {"valid": valid}
 
 
 @router.get("/admin/metrics")
 def admin_metrics(request: Request, x_admin_token: str = Header(None, alias="X-Admin-Token")):
     if x_admin_token != os.getenv("ADMIN_TOKEN", ""):
-        log_event("ADMIN", "fail", get_client_ip(request), "invalid_token_metrics")
+        ip = get_client_ip(request)
+        log_event("ADMIN", "fail", ip, "invalid_token_metrics")
+        _record_admin_fail(ip)
         raise HTTPException(403, detail={"error": "Forbidden", "code": "INVALID_TOKEN"})
 
     m = get_metrics()

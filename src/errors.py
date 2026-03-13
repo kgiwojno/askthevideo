@@ -25,6 +25,9 @@ _ALERT_STYLES = {
     "proxy_down":       {"title": "\U0001f50c Proxy Down",          "color": 16711680},
     "pinecone_error":   {"title": "\U0001f4be Pinecone Error",      "color": 16711680},
     "uncaught_500":     {"title": "\U0001f4a5 Uncaught Server Error", "color": 16711680},
+    "admin_brute_warning":  {"title": "\U0001f513 Admin Login — Minor",    "color": 16776960},
+    "admin_brute_elevated": {"title": "\U0001f6a8 Admin Login — Elevated", "color": 16744448},
+    "admin_brute_critical": {"title": "\U0001f6d1 Admin Login — Critical", "color": 16711680},
 }
 _DEFAULT_STYLE = {"title": "\u26a0\ufe0f Alert", "color": 15105570}
 

@@ -599,6 +599,46 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 
 ---
 
+## 38. Auth and admin login event logging
+
+**Spec said:** No logging of authentication attempts.
+**Actual:** All access key and admin login attempts are logged with IP address, including both successful and failed attempts.
+
+**New event types:**
+
+| Event | Type | Subtype | Detail |
+|-------|------|---------|--------|
+| Valid access key | `AUTH` | `success` | `tier=key` |
+| Invalid access key | `AUTH` | `fail` | `invalid_key` |
+| Admin login success | `ADMIN` | `success` | `admin_login` |
+| Admin login fail | `ADMIN` | `fail` | `invalid_token` |
+| Admin metrics unauthorized | `ADMIN` | `fail` | `invalid_token_metrics` |
+
+**Files modified:** `api/routes/auth.py`, `api/routes/admin.py`
+
+---
+
+## 39. Admin brute force detection with escalating alerts
+
+**Spec said:** No brute force detection.
+**Actual:** Failed admin login attempts tracked per IP in a 30-minute sliding window. Discord alerts escalate every 3 attempts.
+
+**Escalation:**
+
+| Attempts | Severity | Color |
+|----------|----------|-------|
+| 3 | Minor (warning) | Yellow |
+| 6 | Elevated | Orange |
+| 9+ | Critical (every 3) | Red |
+
+- Both `/admin/auth` and `/admin/metrics` endpoints count toward the same tracker
+- Successful login clears the IP's failed attempt history
+- Each severity level has its own Discord throttle
+
+**Files modified:** `api/routes/admin.py`, `src/errors.py`
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -640,3 +680,5 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | 35 | `src/metrics.py`, `api/routes/admin.py` | Fixed $5 budget with single alert | Cycle-based: auto-detect $5 reloads, alert at 80% of each cycle, cumulative tracking | Budget reloads don't require config changes |
 | 36 | `src/metrics.py`, `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/routes/admin.py` | No user identification | Anonymous tracking via localStorage UUID + Supabase `users` table | Cross-session user analytics without cookies |
 | 37 | `src/errors.py` | Plain text Discord messages | Color-coded embeds with title, environment footer, timestamp + User-Agent fix | Visual clarity, fixes Discord blocking Python user agent |
+| 38 | `api/routes/auth.py`, `api/routes/admin.py` | No auth logging | All login attempts logged (AUTH/ADMIN events) with IP and success/fail | Security audit trail |
+| 39 | `api/routes/admin.py`, `src/errors.py` | No brute force detection | Escalating alerts at 3/6/9+ failed admin logins per IP in 30-min window | Intrusion detection |
