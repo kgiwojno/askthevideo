@@ -79,7 +79,7 @@ event_logger.addHandler(event_handler)
 def log_event(event_type: str, subtype: str, ip: str = "—", detail: str = "", user_id: str = ""):
     """Write structured event to rotating log file and Supabase.
 
-    Event types: QUERY, VIDEO, SESSION, ERROR, KEY, ALERT, TOOL
+    Event types: QUERY, VIDEO, SESSION, ERROR, KEY, ALERT, TOOL, AUTH, ADMIN
     """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"{ts} | {event_type:<7} | {subtype:<6} | {ip:<15} | {detail}"

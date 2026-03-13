@@ -3,11 +3,12 @@
 import os
 import time
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api.dependencies import get_pinecone
-from src.metrics import get_metrics, get_recent_events, get_user_stats, BUDGET_CYCLE
+from api.utils import get_client_ip
+from src.metrics import get_metrics, get_recent_events, get_user_stats, log_event, BUDGET_CYCLE
 
 router = APIRouter()
 
@@ -38,14 +39,20 @@ def get_pinecone_stats() -> dict:
 
 
 @router.post("/admin/auth")
-def admin_auth(request: AdminAuthRequest):
-    valid = request.token == os.getenv("ADMIN_TOKEN", "")
+def admin_auth(body: AdminAuthRequest, request: Request):
+    valid = body.token == os.getenv("ADMIN_TOKEN", "")
+    ip = get_client_ip(request)
+    if valid:
+        log_event("ADMIN", "success", ip, "admin_login")
+    else:
+        log_event("ADMIN", "fail", ip, "invalid_token")
     return {"valid": valid}
 
 
 @router.get("/admin/metrics")
-def admin_metrics(x_admin_token: str = Header(None, alias="X-Admin-Token")):
+def admin_metrics(request: Request, x_admin_token: str = Header(None, alias="X-Admin-Token")):
     if x_admin_token != os.getenv("ADMIN_TOKEN", ""):
+        log_event("ADMIN", "fail", get_client_ip(request), "invalid_token_metrics")
         raise HTTPException(403, detail={"error": "Forbidden", "code": "INVALID_TOKEN"})
 
     m = get_metrics()

@@ -55,7 +55,7 @@ CREATE INDEX idx_events_env_type ON events (environment, event_type);
 |--------|------|-------------|
 | `id` | bigint | Auto-incrementing primary key |
 | `created_at` | timestamptz | Auto-set by Supabase on insert |
-| `event_type` | text | `QUERY`, `VIDEO`, `SESSION`, `ERROR`, `KEY`, `ALERT`, `TOOL` |
+| `event_type` | text | `QUERY`, `VIDEO`, `SESSION`, `ERROR`, `KEY`, `ALERT`, `TOOL`, `AUTH`, `ADMIN` |
 | `subtype` | text | Context-dependent (e.g., `free`/`key` for queries, `cache`/`api` for tools) |
 | `ip` | text | Client IP address |
 | `detail` | text | Human-readable event detail |
@@ -262,7 +262,11 @@ User asks a question
   ├── log_event("QUERY", ...)  →  local file + POST /events (daemon thread)
   └── record_tokens(in, out)   →  POST /metrics_snapshots (daemon thread)
 
+User enters access key
+  └── log_event("AUTH", success/fail)  →  local file + POST /events
+
 Admin opens dashboard
+  ├── log_event("ADMIN", success/fail)  →  local file + POST /events
   └── get_recent_events(50)  →  GET /events?environment=eq.production&limit=50 (last 7 days)
                                   fallback: read local events.log if Supabase unavailable
 ```
@@ -339,6 +343,16 @@ SELECT
   AVG(CAST(substring(detail FROM 'fetch=(\d+)ms') AS int)) AS avg_fetch_ms,
   AVG(CAST(substring(detail FROM 'duration=(\d+)s') AS int)) AS avg_duration_s
 FROM events WHERE event_type = 'VIDEO' AND subtype = 'new' AND environment = 'production';
+
+-- Auth attempts (access key + admin login)
+SELECT event_type, subtype, ip, detail, created_at FROM events
+WHERE event_type IN ('AUTH', 'ADMIN') AND environment = 'production'
+ORDER BY created_at DESC LIMIT 50;
+
+-- Failed login attempts (potential intrusion)
+SELECT event_type, subtype, ip, COUNT(*) AS attempts FROM events
+WHERE event_type IN ('AUTH', 'ADMIN') AND subtype = 'fail' AND environment = 'production'
+GROUP BY event_type, subtype, ip ORDER BY attempts DESC;
 ```
 
 ### Clean up old data
