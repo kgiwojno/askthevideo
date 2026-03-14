@@ -30,3 +30,6 @@ Thumbs.db
 # Koyeb test (throwaway)
 koyeb-test/
 .env.docker
+
+# Deploy script (contains service name)
+scripts/deploy.sh

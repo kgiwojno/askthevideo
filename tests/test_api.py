@@ -24,7 +24,10 @@ class TestHealth:
     def test_health_returns_200(self, client):
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "commit" in data
+        assert "deployment_id" in data
 
 
 class TestStatus:

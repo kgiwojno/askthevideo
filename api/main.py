@@ -43,9 +43,24 @@ app.include_router(status.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
 
+def _get_git_sha() -> str:
+    """Read git commit hash baked into the image at build time."""
+    try:
+        return Path("/app/.git_sha").read_text().strip()
+    except Exception:
+        return "unknown"
+
+
+_GIT_SHA = _get_git_sha()
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "commit": _GIT_SHA,
+        "deployment_id": os.getenv("KOYEB_DEPLOYMENT_ID", "local"),
+    }
 
 
 # Static files — only mount if frontend/assets exists
