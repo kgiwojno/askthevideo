@@ -59,7 +59,7 @@ def health():
     return {
         "status": "ok",
         "commit": _GIT_SHA,
-        "deployment_id": os.getenv("KOYEB_DEPLOYMENT_ID", "local"),
+        "deployment_id": os.getenv("KOYEB_INSTANCE_ID", "local"),
     }
 
 
