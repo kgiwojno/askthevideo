@@ -65,12 +65,15 @@ askthevideo/
 │   └── gcf-transcript-proxy/   # [Reference] Failed GCF approach
 ├── frontend/                   # React build (from Lovable)
 ├── docs/                       # Project documentation
-│   ├── HANDOFF_ASKTHEVIDEO.md  # Master handoff document
+│   ├── CHANGELOG.md            # Ongoing change log
 │   ├── API_ENDPOINTS.md        # Full API reference
-│   ├── DEVIATIONS.md           # 42 spec deviations documented
 │   ├── KNOWN_ISSUES.md         # Non-critical issues for future fix
-│   ├── BUG_CASCADE_FAILURE.md  # Tool failure cascade analysis
 │   ├── SUPABASE_SETUP.md       # Supabase setup guide
+│   ├── archive/                # Historical documents (no longer updated)
+│   │   ├── HANDOFF_ASKTHEVIDEO.md
+│   │   ├── DEVIATIONS.md       # 42 spec deviations documented
+│   │   ├── BUG_CASCADE_FAILURE.md
+│   │   └── README.md
 │   └── spec/                   # Original planning documents (pre-build)
 ├── Dockerfile
 ├── Makefile
