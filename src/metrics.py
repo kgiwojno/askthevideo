@@ -513,16 +513,21 @@ def _restore_from_supabase():
                 _app_metrics["alert_count"] = result.get("alert_count", 0)
                 _app_metrics["key_queries"] = result.get("key_queries", 0)
 
-    # Restore token totals from latest metrics snapshot
-    snapshot = _supabase_request(
-        "GET",
-        f"/rest/v1/metrics_snapshots?environment=eq.{env}&order=created_at.desc&limit=1",
-    )
-    if snapshot and isinstance(snapshot, list) and snapshot:
-        s = snapshot[0]
-        with _app_metrics["lock"]:
-            _app_metrics["total_input_tokens"] = s.get("total_input_tokens", 0)
-            _app_metrics["total_output_tokens"] = s.get("total_output_tokens", 0)
+    # Restore token totals from latest snapshot per environment (sum all environments
+    # because the Anthropic API key is shared — cost is cumulative regardless of env)
+    total_in = 0
+    total_out = 0
+    for restore_env in ("production", "local"):
+        snapshot = _supabase_request(
+            "GET",
+            f"/rest/v1/metrics_snapshots?environment=eq.{restore_env}&order=created_at.desc&limit=1",
+        )
+        if snapshot and isinstance(snapshot, list) and snapshot:
+            total_in += snapshot[0].get("total_input_tokens", 0)
+            total_out += snapshot[0].get("total_output_tokens", 0)
+    with _app_metrics["lock"]:
+        _app_metrics["total_input_tokens"] = total_in
+        _app_metrics["total_output_tokens"] = total_out
 
     _supabase_logger.info(
         "Restored metrics from Supabase: queries=%d, videos=%d, tokens=%d/%d",
