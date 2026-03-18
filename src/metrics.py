@@ -193,6 +193,103 @@ def get_user_stats() -> dict:
     }
 
 
+def upsert_video(video_id: str, data: dict):
+    """Create or update a video record in Supabase.
+
+    On first load: inserts full record with load_count=1.
+    On subsequent loads: increments load_count, updates last_loaded_at and any new metadata.
+    """
+    env = _get_app_env()
+    existing = _supabase_request(
+        "GET",
+        f"/rest/v1/videos?video_id=eq.{video_id}&environment=eq.{env}&select=video_id,load_count",
+    )
+    if existing and isinstance(existing, list) and existing:
+        # Existing video — increment load_count, update metadata
+        current_count = existing[0].get("load_count", 0)
+        patch = {
+            "load_count": current_count + 1,
+            "last_loaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        # Update metadata fields if provided (e.g. language may be new)
+        for field in ("title", "channel", "duration_seconds", "duration_display",
+                      "language", "is_generated", "chunk_count", "thumbnail_url"):
+            if field in data and data[field] is not None:
+                patch[field] = data[field]
+        _supabase_patch("videos", f"video_id=eq.{video_id}&environment=eq.{env}", patch)
+    else:
+        # New video
+        row = {"video_id": video_id, "environment": env, "load_count": 1, "fail_count": 0}
+        row.update(data)
+        _supabase_request("POST", "/rest/v1/videos", row)
+
+
+def record_video_error(video_id: str, error: str):
+    """Record a failed video load attempt in Supabase."""
+    env = _get_app_env()
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    existing = _supabase_request(
+        "GET",
+        f"/rest/v1/videos?video_id=eq.{video_id}&environment=eq.{env}&select=video_id,fail_count",
+    )
+    if existing and isinstance(existing, list) and existing:
+        current_fails = existing[0].get("fail_count", 0)
+        _supabase_patch("videos", f"video_id=eq.{video_id}&environment=eq.{env}", {
+            "fail_count": current_fails + 1,
+            "last_error": error,
+            "last_error_at": now,
+        })
+    else:
+        _supabase_request("POST", "/rest/v1/videos", {
+            "video_id": video_id,
+            "environment": env,
+            "load_count": 0,
+            "fail_count": 1,
+            "last_error": error,
+            "last_error_at": now,
+        })
+
+
+def update_video_languages(video_id: str, languages: list):
+    """Update the available_languages field for a video in Supabase."""
+    env = _get_app_env()
+    _supabase_patch("videos", f"video_id=eq.{video_id}&environment=eq.{env}", {
+        "available_languages": json.dumps(languages),
+    })
+
+
+def get_video_catalog() -> list[dict]:
+    """Fetch all videos from Supabase for admin dashboard."""
+    env = _get_app_env()
+    result = _supabase_request(
+        "GET",
+        f"/rest/v1/videos?environment=eq.{env}&order=last_loaded_at.desc",
+    )
+    if result and isinstance(result, list):
+        return result
+    return []
+
+
+def _supabase_patch(table: str, query: str, data: dict):
+    """PATCH a row in Supabase."""
+    url_base, key = _get_supabase_config()
+    if not url_base or not key:
+        return
+    url = f"{url_base}/rest/v1/{table}?{query}"
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    body = json.dumps(data).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="PATCH")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        _supabase_logger.debug("Supabase PATCH %s failed: %s", table, e)
+
+
 import re
 
 _KV_PATTERN = re.compile(r'(\w+)=(\d+(?:\.\d+)?(?:ms|s)?)')

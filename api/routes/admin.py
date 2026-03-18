@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from api.dependencies import get_pinecone
 from api.utils import get_client_ip
 from src.errors import send_discord_alert
-from src.metrics import get_metrics, get_recent_events, get_user_stats, log_event, BUDGET_CYCLE
+from src.metrics import get_metrics, get_recent_events, get_user_stats, get_video_catalog, log_event, BUDGET_CYCLE
 
 router = APIRouter()
 
@@ -99,6 +99,7 @@ def admin_metrics(request: Request, x_admin_token: str = Header(None, alias="X-A
     events = get_recent_events(50)
     pc_stats = get_pinecone_stats()
     user_stats = get_user_stats()
+    video_catalog = get_video_catalog()
 
     return {
         "realtime": {
@@ -132,6 +133,7 @@ def admin_metrics(request: Request, x_admin_token: str = Header(None, alias="X-A
         },
         "pinecone": pc_stats,
         "users": user_stats,
+        "videos": video_catalog,
         "events": events,
         "last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

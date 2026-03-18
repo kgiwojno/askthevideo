@@ -254,7 +254,7 @@ Run against a live server (local or production). Tests the full flow including r
 
 ---
 
-## 11. All 41 Documented Deviations from Original Spec
+## 11. All 42 Documented Deviations from Original Spec
 
 Every place where the actual build differs from the original spec is documented in `docs/DEVIATIONS.md`. Categories:
 
@@ -267,7 +267,7 @@ Every place where the actual build differs from the original spec is documented 
 | Extract script bugs | 3 | Multi-line imports, string format, indented imports |
 | YouTube IP blocking | 4 | 3 failed attempts + residential proxy solution |
 | Error handling improvements | 3 | Proxy-aware messages, expanded exception types, tool cascade failure fix |
-| Production operations | 8 | Cost tracking, tool cache logging, log format fix, event log path, Supabase persistent logging, enhanced observability, budget cycle tracking, IP logging on all events |
+| Production operations | 9 | Cost tracking, tool cache logging, log format fix, event log path, Supabase persistent logging, enhanced observability, budget cycle tracking, IP logging on all events, video catalog tracking |
 | Alerting & monitoring | 6 | Discord integration, unused APP_URL constant, slow query alert, color-coded embeds, auth logging, admin brute force detection |
 | Deployment & versioning | 1 | Health endpoint returns git commit hash + Koyeb instance ID |
 | Code organization | 2 | Shared utility module, video selection filtering |
@@ -305,7 +305,7 @@ Every place where the actual build differs from the original spec is documented 
 | End-to-end smoke tests | 15 |
 | API endpoints | 11 |
 | AI tools | 5 |
-| Deviations from spec | 41 (all documented) |
+| Deviations from spec | 42 (all documented) |
 | YouTube IP blocking workarounds tried | 3 (all failed) |
 | Final solution (Webshare proxy) | ~10 lines of code |
 | Cost per 5-question session (60-min video) | ~$0.15-0.20 |

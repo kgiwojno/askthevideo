@@ -381,6 +381,27 @@ Dashboard metrics: system stats, session counts, cost tracking, Pinecone stats, 
     "avg_sessions_per_user": 1.5,
     "avg_questions_per_user": 2.8
   },
+  "videos": [
+    {
+      "video_id": "dQw4w9WgXcQ",
+      "title": "Rick Astley - Never Gonna Give You Up",
+      "channel": "Rick Astley",
+      "duration_seconds": 213,
+      "duration_display": "3:33",
+      "language": "en",
+      "is_generated": false,
+      "chunk_count": 3,
+      "thumbnail_url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "first_loaded_at": "2025-03-10T10:00:00Z",
+      "last_loaded_at": "2025-03-10T14:00:00Z",
+      "load_count": 5,
+      "fail_count": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "available_languages": null,
+      "environment": "production"
+    }
+  ],
   "events": [
     {"timestamp": "...", "type": "QUERY", "subtype": "free", "ip": "...", "detail": "..."}
   ],

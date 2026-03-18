@@ -1,5 +1,6 @@
 """POST/GET/DELETE/PATCH /api/videos endpoints."""
 
+import threading
 import time
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 from api.dependencies import get_pinecone
 from api.session import get_or_create_session, build_limits
 from api.utils import get_client_ip
-from src.metrics import record_metric, log_event, increment_user_stat
+from src.metrics import record_metric, log_event, increment_user_stat, upsert_video, record_video_error, update_video_languages
 from config.settings import MAX_VIDEOS_FREE, MAX_DURATION_FREE, CHUNK_WINDOW_SECONDS, CHUNK_CARRY_SNIPPETS
 from src.chunking import chunk_transcript, format_time
 from src.metadata import fetch_video_metadata
@@ -16,6 +17,23 @@ from src.transcript import extract_video_id, fetch_transcript
 from src.vectorstore import namespace_exists, fetch_metadata, upsert_chunks, upsert_metadata_record
 
 router = APIRouter()
+
+
+def _fetch_available_languages(video_id: str):
+    """Background task: list available transcript languages and update Supabase."""
+    try:
+        from src.transcript import _get_transcript_api
+        ytt_api = _get_transcript_api()
+        transcript_list = ytt_api.list(video_id)
+        languages = []
+        for t in transcript_list:
+            label = t.language_code
+            if t.is_generated:
+                label += " (auto)"
+            languages.append(label)
+        update_video_languages(video_id, languages)
+    except Exception:
+        pass  # best-effort, don't fail silently
 
 
 class VideoRequest(BaseModel):
@@ -77,8 +95,15 @@ def post_video(
                 f'"{video_info["title"]}" video={video_id} duration={meta.get("duration_display", "?")}',
                 user_id=uid,
             )
-            import threading
             threading.Thread(target=increment_user_stat, args=(uid, "total_videos"), daemon=True).start()
+            threading.Thread(target=upsert_video, args=(video_id, {
+                "title": video_info["title"],
+                "channel": video_info["channel"],
+                "duration_display": meta.get("duration_display", ""),
+                "duration_seconds": meta.get("duration_seconds"),
+                "chunk_count": video_info["chunk_count"],
+                "thumbnail_url": video_info["thumbnail_url"],
+            }), daemon=True).start()
             return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 
     # New video — fetch transcript
@@ -87,7 +112,10 @@ def post_video(
         transcript = fetch_transcript(video_id)
     except ValueError as e:
         msg = str(e)
-        log_event("ERROR", "video", get_client_ip(request), f"fetch_transcript: {msg[:80]}")
+        log_event("ERROR", "video", ip, f"fetch_transcript: {msg[:80]}")
+        # Record failure in Supabase + fetch available languages in background
+        threading.Thread(target=record_video_error, args=(video_id, msg[:200]), daemon=True).start()
+        threading.Thread(target=_fetch_available_languages, args=(video_id,), daemon=True).start()
         if "blocking" in msg.lower():
             raise HTTPException(503, detail={"error": msg, "code": "IP_BLOCKED"})
         elif "disabled" in msg.lower():
@@ -145,11 +173,21 @@ def post_video(
     log_event(
         "VIDEO", "new", ip,
         f'"{oembed["video_title"]}" video={video_id} chunks={len(chunks)} '
-        f"duration={duration_seconds}s fetch={fetch_ms}ms",
+        f'duration={duration_seconds}s fetch={fetch_ms}ms lang={transcript["language"]} '
+        f'generated={transcript["is_generated"]}',
         user_id=uid,
     )
-    import threading
     threading.Thread(target=increment_user_stat, args=(uid, "total_videos"), daemon=True).start()
+    threading.Thread(target=upsert_video, args=(video_id, {
+        "title": oembed["video_title"],
+        "channel": oembed["channel"],
+        "duration_seconds": duration_seconds,
+        "duration_display": format_time(duration_seconds),
+        "language": transcript["language"],
+        "is_generated": transcript["is_generated"],
+        "chunk_count": len(chunks),
+        "thumbnail_url": oembed["thumbnail_url"],
+    }), daemon=True).start()
 
     return {"session_id": sid, "video": video_info, "limits": build_limits(session)}
 

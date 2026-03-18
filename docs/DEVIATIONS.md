@@ -672,6 +672,26 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 
 ---
 
+## 42. Video catalog tracking in Supabase
+
+**Spec said:** No video catalog or persistent video tracking.
+**Actual:** New Supabase `videos` table tracks every video ever loaded, with metadata, load counts, error history, and available languages.
+
+**What was added:**
+
+- **Supabase `videos` table:** `video_id` (PK), `title`, `channel`, `duration_seconds`, `duration_display`, `language`, `is_generated`, `chunk_count`, `thumbnail_url`, `first_loaded_at`, `last_loaded_at`, `load_count`, `fail_count`, `last_error`, `last_error_at`, `available_languages` (jsonb), `environment`
+- **`src/metrics.py` new functions:** `upsert_video()`, `record_video_error()`, `update_video_languages()`, `get_video_catalog()`, `_supabase_patch()` helper
+- **`api/routes/videos.py` changes:**
+  - Cache hit: upserts video in Supabase (background thread)
+  - New video: upserts with language + is_generated info; log now includes `lang=` and `generated=` fields
+  - Failure: records error + fetches available languages via background `_fetch_available_languages()` call using `ytt_api.list()`
+- **`api/routes/admin.py`:** Admin metrics response now includes `"videos"` array from `get_video_catalog()`
+- **RLS:** INSERT + SELECT + UPDATE for anon on `videos` table (same pattern as `users`)
+
+**Files modified:** `src/metrics.py`, `api/routes/videos.py`, `api/routes/admin.py`
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -717,3 +737,4 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | 39 | `api/routes/admin.py`, `src/errors.py` | No brute force detection | Escalating alerts at 3/6/9+ failed admin logins per IP in 30-min window | Intrusion detection |
 | 40 | `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/main.py` | IP missing on SESSION, TOOL, and 500 events | Client IP propagated to all user-facing log events | Complete IP trail for observability |
 | 41 | `api/main.py`, `Dockerfile`, `tests/test_api.py` | `/health` returns `{"status": "ok"}` | Returns commit hash + Koyeb instance ID | Deployment identification in admin panel |
+| 42 | `src/metrics.py`, `api/routes/videos.py`, `api/routes/admin.py` | No video catalog | Supabase `videos` table with upsert on load, error tracking, available languages | Persistent video catalog for admin panel |
