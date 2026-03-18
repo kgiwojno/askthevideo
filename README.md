@@ -67,7 +67,7 @@ askthevideo/
 ├── docs/                       # Project documentation
 │   ├── HANDOFF_ASKTHEVIDEO.md  # Master handoff document
 │   ├── API_ENDPOINTS.md        # Full API reference
-│   ├── DEVIATIONS.md           # 39 spec deviations documented
+│   ├── DEVIATIONS.md           # 41 spec deviations documented
 │   ├── KNOWN_ISSUES.md         # Non-critical issues for future fix
 │   ├── BUG_CASCADE_FAILURE.md  # Tool failure cascade analysis
 │   ├── SUPABASE_SETUP.md       # Supabase setup guide

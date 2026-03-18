@@ -639,6 +639,39 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 
 ---
 
+## 40. IP address logging on all user-facing events
+
+**Spec said:** IP logged only on QUERY, VIDEO, and ERROR events. SESSION start, TOOL events, and uncaught 500 errors logged `"—"` instead of IP.
+**Actual:** Client IP now propagated to all user-facing log events.
+
+**Changes:**
+- `get_or_create_session()` accepts new `ip` parameter, passes it to SESSION start event
+- `build_tools()` accepts new `ip` parameter, closes over it for all 5 tool wrappers (TOOL events + TOOL error events)
+- Global 500 exception handler extracts IP from request
+- SESSION end still logs `"—"` (fires during TTL cleanup with no request context)
+
+**Files modified:** `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/main.py`
+
+---
+
+## 41. Health endpoint returns version info
+
+**Spec said:** Health endpoint returns `{"status": "ok"}`.
+**Actual:** Health endpoint returns git commit hash and Koyeb instance ID for deployment identification.
+
+**Response:**
+```json
+{"status": "ok", "commit": "a1b2c3d", "deployment_id": "3f8e2a1b-..."}
+```
+
+- Git short SHA baked into Docker image at build time (stored in `/app/.git_sha`)
+- `KOYEB_INSTANCE_ID` auto-injected by Koyeb; falls back to `"local"` outside Koyeb
+- Dockerfile updated to copy `.git/`, extract hash, then remove `.git/`
+
+**Files modified:** `api/main.py`, `Dockerfile`, `tests/test_api.py`
+
+---
+
 ## Summary table
 
 | # | File | Spec | Actual | Reason |
@@ -682,3 +715,5 @@ Additionally, `get_recent_events()` now parses the `detail` string and returns s
 | 37 | `src/errors.py` | Plain text Discord messages | Color-coded embeds with title, environment footer, timestamp + User-Agent fix | Visual clarity, fixes Discord blocking Python user agent |
 | 38 | `api/routes/auth.py`, `api/routes/admin.py` | No auth logging | All login attempts logged (AUTH/ADMIN events) with IP and success/fail | Security audit trail |
 | 39 | `api/routes/admin.py`, `src/errors.py` | No brute force detection | Escalating alerts at 3/6/9+ failed admin logins per IP in 30-min window | Intrusion detection |
+| 40 | `api/session.py`, `api/routes/ask.py`, `api/routes/videos.py`, `api/main.py` | IP missing on SESSION, TOOL, and 500 events | Client IP propagated to all user-facing log events | Complete IP trail for observability |
+| 41 | `api/main.py`, `Dockerfile`, `tests/test_api.py` | `/health` returns `{"status": "ok"}` | Returns commit hash + Koyeb instance ID | Deployment identification in admin panel |

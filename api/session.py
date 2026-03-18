@@ -10,7 +10,7 @@ sessions: dict[str, dict] = {}
 SESSION_TTL = timedelta(hours=SESSION_TTL_HOURS)
 
 
-def get_or_create_session(session_id: str | None, user_id: str = "") -> tuple[str, dict]:
+def get_or_create_session(session_id: str | None, user_id: str = "", ip: str = "—") -> tuple[str, dict]:
     """Get existing session or create new one. Cleans expired sessions."""
     now = datetime.utcnow()
     expired = [k for k, v in sessions.items() if now - v["created_at"] > SESSION_TTL]
@@ -48,7 +48,7 @@ def get_or_create_session(session_id: str | None, user_id: str = "") -> tuple[st
         "user_id": user_id,
     }
     record_metric("active_sessions")
-    log_event("SESSION", "start", "—", f"active={_app_metrics['active_sessions']}", user_id=user_id)
+    log_event("SESSION", "start", ip, f"active={_app_metrics['active_sessions']}", user_id=user_id)
 
     # Upsert user record in Supabase (fire-and-forget)
     if user_id:

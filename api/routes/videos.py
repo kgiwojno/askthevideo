@@ -33,7 +33,8 @@ def post_video(
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
+    ip = get_client_ip(request)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "", ip=ip)
 
     # Validate URL
     try:
@@ -70,7 +71,6 @@ def post_video(
             session["loaded_videos"].append(video_info)
             session["agent"] = None  # force agent rebuild
             record_metric("total_videos_loaded")
-            ip = get_client_ip(request)
             uid = session.get("user_id", "")
             log_event(
                 "VIDEO", "cache", ip,
@@ -141,7 +141,6 @@ def post_video(
     record_metric("total_videos_loaded")
     record_metric("total_videos_cached")
     fetch_ms = int((time.monotonic() - t0) * 1000)
-    ip = get_client_ip(request)
     uid = session.get("user_id", "")
     log_event(
         "VIDEO", "new", ip,

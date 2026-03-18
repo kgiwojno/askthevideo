@@ -16,8 +16,15 @@ Basic health check for load balancers. Not under `/api` prefix.
 
 **Response (200):**
 ```json
-{"status": "ok"}
+{
+  "status": "ok",
+  "commit": "a1b2c3d",
+  "deployment_id": "3f8e2a1b-..."
+}
 ```
+
+- `commit`: Git short SHA baked into Docker image at build time (reads `/app/.git_sha`)
+- `deployment_id`: Koyeb instance ID from `KOYEB_INSTANCE_ID` env var (auto-injected by Koyeb); `"local"` when running outside Koyeb
 
 ---
 

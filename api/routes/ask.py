@@ -35,7 +35,7 @@ class AskRequest(BaseModel):
     question: str
 
 
-def build_tools(selected_videos: list[str], pc, index, anthropic_client):
+def build_tools(selected_videos: list[str], pc, index, anthropic_client, ip: str = "—"):
     """Build LangChain @tool wrappers with session video list as closure."""
 
     @tool
@@ -45,10 +45,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
             t0 = time.monotonic()
             result = _vector_search(pc, index, anthropic_client, question, selected_videos)
             ms = int((time.monotonic() - t0) * 1000)
-            log_event("TOOL", "api", "—", f"vector_search latency={ms}ms")
+            log_event("TOOL", "api", ip, f"vector_search latency={ms}ms")
             return result.get("answer", "No relevant content found.")
         except Exception as e:
-            log_event("ERROR", "tool", "—", f"vector_search: {type(e).__name__}: {str(e)[:80]}")
+            log_event("ERROR", "tool", ip, f"vector_search: {type(e).__name__}: {str(e)[:80]}")
             return f"Sorry, I couldn't complete the search right now. Error: {type(e).__name__}"
 
     @tool
@@ -59,10 +59,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
             result = _summarize_video(index, anthropic_client, video_id)
             ms = int((time.monotonic() - t0) * 1000)
             source = "cache" if result.get("cached") else "api"
-            log_event("TOOL", source, "—", f"summarize_video video={video_id} latency={ms}ms")
+            log_event("TOOL", source, ip, f"summarize_video video={video_id} latency={ms}ms")
             return result.get("summary", "Could not generate summary.")
         except Exception as e:
-            log_event("ERROR", "tool", "—", f"summarize_video: {type(e).__name__}: {str(e)[:80]}")
+            log_event("ERROR", "tool", ip, f"summarize_video: {type(e).__name__}: {str(e)[:80]}")
             return f"Sorry, I couldn't generate a summary right now. Error: {type(e).__name__}"
 
     @tool
@@ -73,10 +73,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
             result = _get_topics(index, anthropic_client, video_id)
             ms = int((time.monotonic() - t0) * 1000)
             source = "cache" if result.get("cached") else "api"
-            log_event("TOOL", source, "—", f"list_topics video={video_id} latency={ms}ms")
+            log_event("TOOL", source, ip, f"list_topics video={video_id} latency={ms}ms")
             return result.get("topics", "Could not retrieve topics.")
         except Exception as e:
-            log_event("ERROR", "tool", "—", f"list_topics: {type(e).__name__}: {str(e)[:80]}")
+            log_event("ERROR", "tool", ip, f"list_topics: {type(e).__name__}: {str(e)[:80]}")
             return f"Sorry, I couldn't retrieve topics right now. Error: {type(e).__name__}"
 
     @tool
@@ -86,10 +86,10 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
             t0 = time.monotonic()
             result = _compare_videos(pc, index, anthropic_client, question, selected_videos)
             ms = int((time.monotonic() - t0) * 1000)
-            log_event("TOOL", "api", "—", f"compare_videos latency={ms}ms")
+            log_event("TOOL", "api", ip, f"compare_videos latency={ms}ms")
             return result.get("answer", "No relevant content found.")
         except Exception as e:
-            log_event("ERROR", "tool", "—", f"compare_videos: {type(e).__name__}: {str(e)[:80]}")
+            log_event("ERROR", "tool", ip, f"compare_videos: {type(e).__name__}: {str(e)[:80]}")
             return f"Sorry, I couldn't compare videos right now. Error: {type(e).__name__}"
 
     @tool
@@ -99,7 +99,7 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
             t0 = time.monotonic()
             result = _get_metadata(index, video_id)
             ms = int((time.monotonic() - t0) * 1000)
-            log_event("TOOL", "local", "—", f"get_metadata video={video_id} latency={ms}ms")
+            log_event("TOOL", "local", ip, f"get_metadata video={video_id} latency={ms}ms")
             if result["found"]:
                 m = result["metadata"]
                 return (
@@ -109,7 +109,7 @@ def build_tools(selected_videos: list[str], pc, index, anthropic_client):
                 )
             return f"No metadata found for video_id: {video_id}"
         except Exception as e:
-            log_event("ERROR", "tool", "—", f"get_metadata: {type(e).__name__}: {str(e)[:80]}")
+            log_event("ERROR", "tool", ip, f"get_metadata: {type(e).__name__}: {str(e)[:80]}")
             return f"Sorry, I couldn't retrieve video metadata right now. Error: {type(e).__name__}"
 
     return [vector_search, summarize_video, list_topics, compare_videos, get_metadata]
@@ -139,7 +139,8 @@ def post_ask(
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
+    ip = get_client_ip(request)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "", ip=ip)
     _check_preconditions(session)
 
     try:
@@ -152,7 +153,7 @@ def post_ask(
     selected = [v["video_id"] for v in session["loaded_videos"] if v.get("selected", True)]
     if not selected:
         selected = [v["video_id"] for v in session["loaded_videos"]]
-    tools = build_tools(selected, pc, index, anthropic_client)
+    tools = build_tools(selected, pc, index, anthropic_client, ip=ip)
     agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
 
@@ -194,7 +195,6 @@ def post_ask(
     session["chat_history"].append({"role": "assistant", "content": answer})
 
     record_metric("total_queries")
-    ip = get_client_ip(request)
     uid = session.get("user_id", "")
     query_detail = (
         f'"{question[:50]}" tool={tool_used or "none"} '
@@ -224,7 +224,8 @@ async def post_ask_stream(
     x_session_id: str | None = Header(None, alias="X-Session-ID"),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
 ):
-    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "")
+    ip = get_client_ip(request)
+    sid, session = get_or_create_session(x_session_id, user_id=x_user_id or "", ip=ip)
     _check_preconditions(session)
 
     try:
@@ -237,7 +238,7 @@ async def post_ask_stream(
     selected = [v["video_id"] for v in session["loaded_videos"] if v.get("selected", True)]
     if not selected:
         selected = [v["video_id"] for v in session["loaded_videos"]]
-    tools = build_tools(selected, pc, index, anthropic_client)
+    tools = build_tools(selected, pc, index, anthropic_client, ip=ip)
     agent = get_or_create_agent(session, tools, selected)
     config = {"configurable": {"thread_id": session["agent_thread_id"]}}
 
@@ -327,7 +328,6 @@ async def post_ask_stream(
             session["chat_history"].append({"role": "assistant", "content": full_answer})
 
             record_metric("total_queries")
-            ip = get_client_ip(request)
             uid = session.get("user_id", "")
             query_detail = (
                 f'"{question[:50]}" tool={tool_used or "none"} '

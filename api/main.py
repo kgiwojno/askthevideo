@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routes import admin, ask, auth, status, videos
+from api.utils import get_client_ip
 from src.metrics import log_event
 from src.errors import send_discord_alert
 
@@ -26,7 +27,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    log_event("ERROR", "500", "—", f"{request.url.path}: {type(exc).__name__}: {str(exc)[:80]}")
+    ip = get_client_ip(request)
+    log_event("ERROR", "500", ip, f"{request.url.path}: {type(exc).__name__}: {str(exc)[:80]}")
     send_discord_alert(
         f"Uncaught 500: {request.url.path} — {type(exc).__name__}: {str(exc)[:200]}",
         alert_type="uncaught_500",
